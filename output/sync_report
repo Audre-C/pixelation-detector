@@ -1,0 +1,342 @@
+{
+  "reference_file": {
+    "path": "data\\original.mp4",
+    "fps": 60.0,
+    "frame_count": 398,
+    "duration_seconds": 6.633333333333334,
+    "width": 1920,
+    "height": 1080
+  },
+  "test_file": {
+    "path": "data\\pixelated.mp4",
+    "fps": 60.0,
+    "frame_count": 398,
+    "duration_seconds": 6.633333333333334,
+    "width": 1920,
+    "height": 1080
+  },
+  "synchronization": {
+    "detected_offset_frames": 0,
+    "offset_convention": "positive offset means: ref_index = test_index + offset (i.e., the reference needs to be advanced by `offset` frames to align with the test stream)",
+    "is_confident": true,
+    "confidence_margin": 1.0,
+    "min_required_confidence_margin": 0.1,
+    "best_mean_hamming_distance": 0.0,
+    "second_best_mean_hamming_distance": 0.4723618090452261,
+    "frames_used_reference": 200,
+    "frames_used_test": 200
+  },
+  "distance_curve": [
+    {
+      "offset": -30,
+      "mean_hamming_distance": 8.847058823529412,
+      "n_pairs_compared": 170
+    },
+    {
+      "offset": -29,
+      "mean_hamming_distance": 8.631578947368421,
+      "n_pairs_compared": 171
+    },
+    {
+      "offset": -28,
+      "mean_hamming_distance": 8.406976744186046,
+      "n_pairs_compared": 172
+    },
+    {
+      "offset": -27,
+      "mean_hamming_distance": 8.184971098265896,
+      "n_pairs_compared": 173
+    },
+    {
+      "offset": -26,
+      "mean_hamming_distance": 7.931034482758621,
+      "n_pairs_compared": 174
+    },
+    {
+      "offset": -25,
+      "mean_hamming_distance": 7.68,
+      "n_pairs_compared": 175
+    },
+    {
+      "offset": -24,
+      "mean_hamming_distance": 7.409090909090909,
+      "n_pairs_compared": 176
+    },
+    {
+      "offset": -23,
+      "mean_hamming_distance": 7.129943502824859,
+      "n_pairs_compared": 177
+    },
+    {
+      "offset": -22,
+      "mean_hamming_distance": 6.865168539325842,
+      "n_pairs_compared": 178
+    },
+    {
+      "offset": -21,
+      "mean_hamming_distance": 6.603351955307263,
+      "n_pairs_compared": 179
+    },
+    {
+      "offset": -20,
+      "mean_hamming_distance": 6.333333333333333,
+      "n_pairs_compared": 180
+    },
+    {
+      "offset": -19,
+      "mean_hamming_distance": 6.05524861878453,
+      "n_pairs_compared": 181
+    },
+    {
+      "offset": -18,
+      "mean_hamming_distance": 5.769230769230769,
+      "n_pairs_compared": 182
+    },
+    {
+      "offset": -17,
+      "mean_hamming_distance": 5.497267759562842,
+      "n_pairs_compared": 183
+    },
+    {
+      "offset": -16,
+      "mean_hamming_distance": 5.228260869565218,
+      "n_pairs_compared": 184
+    },
+    {
+      "offset": -15,
+      "mean_hamming_distance": 4.92972972972973,
+      "n_pairs_compared": 185
+    },
+    {
+      "offset": -14,
+      "mean_hamming_distance": 4.634408602150538,
+      "n_pairs_compared": 186
+    },
+    {
+      "offset": -13,
+      "mean_hamming_distance": 4.342245989304812,
+      "n_pairs_compared": 187
+    },
+    {
+      "offset": -12,
+      "mean_hamming_distance": 4.042553191489362,
+      "n_pairs_compared": 188
+    },
+    {
+      "offset": -11,
+      "mean_hamming_distance": 3.7566137566137567,
+      "n_pairs_compared": 189
+    },
+    {
+      "offset": -10,
+      "mean_hamming_distance": 3.463157894736842,
+      "n_pairs_compared": 190
+    },
+    {
+      "offset": -9,
+      "mean_hamming_distance": 3.1518324607329844,
+      "n_pairs_compared": 191
+    },
+    {
+      "offset": -8,
+      "mean_hamming_distance": 2.8333333333333335,
+      "n_pairs_compared": 192
+    },
+    {
+      "offset": -7,
+      "mean_hamming_distance": 2.5077720207253886,
+      "n_pairs_compared": 193
+    },
+    {
+      "offset": -6,
+      "mean_hamming_distance": 2.195876288659794,
+      "n_pairs_compared": 194
+    },
+    {
+      "offset": -5,
+      "mean_hamming_distance": 1.876923076923077,
+      "n_pairs_compared": 195
+    },
+    {
+      "offset": -4,
+      "mean_hamming_distance": 1.5612244897959184,
+      "n_pairs_compared": 196
+    },
+    {
+      "offset": -3,
+      "mean_hamming_distance": 1.2284263959390862,
+      "n_pairs_compared": 197
+    },
+    {
+      "offset": -2,
+      "mean_hamming_distance": 0.8585858585858586,
+      "n_pairs_compared": 198
+    },
+    {
+      "offset": -1,
+      "mean_hamming_distance": 0.4723618090452261,
+      "n_pairs_compared": 199
+    },
+    {
+      "offset": 0,
+      "mean_hamming_distance": 0.0,
+      "n_pairs_compared": 200
+    },
+    {
+      "offset": 1,
+      "mean_hamming_distance": 0.4723618090452261,
+      "n_pairs_compared": 199
+    },
+    {
+      "offset": 2,
+      "mean_hamming_distance": 0.8585858585858586,
+      "n_pairs_compared": 198
+    },
+    {
+      "offset": 3,
+      "mean_hamming_distance": 1.2284263959390862,
+      "n_pairs_compared": 197
+    },
+    {
+      "offset": 4,
+      "mean_hamming_distance": 1.5612244897959184,
+      "n_pairs_compared": 196
+    },
+    {
+      "offset": 5,
+      "mean_hamming_distance": 1.876923076923077,
+      "n_pairs_compared": 195
+    },
+    {
+      "offset": 6,
+      "mean_hamming_distance": 2.195876288659794,
+      "n_pairs_compared": 194
+    },
+    {
+      "offset": 7,
+      "mean_hamming_distance": 2.5077720207253886,
+      "n_pairs_compared": 193
+    },
+    {
+      "offset": 8,
+      "mean_hamming_distance": 2.8333333333333335,
+      "n_pairs_compared": 192
+    },
+    {
+      "offset": 9,
+      "mean_hamming_distance": 3.1518324607329844,
+      "n_pairs_compared": 191
+    },
+    {
+      "offset": 10,
+      "mean_hamming_distance": 3.463157894736842,
+      "n_pairs_compared": 190
+    },
+    {
+      "offset": 11,
+      "mean_hamming_distance": 3.7566137566137567,
+      "n_pairs_compared": 189
+    },
+    {
+      "offset": 12,
+      "mean_hamming_distance": 4.042553191489362,
+      "n_pairs_compared": 188
+    },
+    {
+      "offset": 13,
+      "mean_hamming_distance": 4.342245989304812,
+      "n_pairs_compared": 187
+    },
+    {
+      "offset": 14,
+      "mean_hamming_distance": 4.634408602150538,
+      "n_pairs_compared": 186
+    },
+    {
+      "offset": 15,
+      "mean_hamming_distance": 4.92972972972973,
+      "n_pairs_compared": 185
+    },
+    {
+      "offset": 16,
+      "mean_hamming_distance": 5.228260869565218,
+      "n_pairs_compared": 184
+    },
+    {
+      "offset": 17,
+      "mean_hamming_distance": 5.497267759562842,
+      "n_pairs_compared": 183
+    },
+    {
+      "offset": 18,
+      "mean_hamming_distance": 5.769230769230769,
+      "n_pairs_compared": 182
+    },
+    {
+      "offset": 19,
+      "mean_hamming_distance": 6.05524861878453,
+      "n_pairs_compared": 181
+    },
+    {
+      "offset": 20,
+      "mean_hamming_distance": 6.333333333333333,
+      "n_pairs_compared": 180
+    },
+    {
+      "offset": 21,
+      "mean_hamming_distance": 6.603351955307263,
+      "n_pairs_compared": 179
+    },
+    {
+      "offset": 22,
+      "mean_hamming_distance": 6.865168539325842,
+      "n_pairs_compared": 178
+    },
+    {
+      "offset": 23,
+      "mean_hamming_distance": 7.129943502824859,
+      "n_pairs_compared": 177
+    },
+    {
+      "offset": 24,
+      "mean_hamming_distance": 7.409090909090909,
+      "n_pairs_compared": 176
+    },
+    {
+      "offset": 25,
+      "mean_hamming_distance": 7.68,
+      "n_pairs_compared": 175
+    },
+    {
+      "offset": 26,
+      "mean_hamming_distance": 7.931034482758621,
+      "n_pairs_compared": 174
+    },
+    {
+      "offset": 27,
+      "mean_hamming_distance": 8.184971098265896,
+      "n_pairs_compared": 173
+    },
+    {
+      "offset": 28,
+      "mean_hamming_distance": 8.406976744186046,
+      "n_pairs_compared": 172
+    },
+    {
+      "offset": 29,
+      "mean_hamming_distance": 8.631578947368421,
+      "n_pairs_compared": 171
+    },
+    {
+      "offset": 30,
+      "mean_hamming_distance": 8.847058823529412,
+      "n_pairs_compared": 170
+    }
+  ],
+  "config_used": {
+    "sync_window_frames": 200,
+    "max_offset_frames": 30,
+    "phash_size": 8,
+    "min_confidence_margin": 0.1
+  }
+}

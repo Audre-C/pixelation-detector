@@ -1,0 +1,343 @@
+{
+  "reference_file": {
+    "path": "data\\original.mp4",
+    "fps": 30.0,
+    "frame_count": 202,
+    "duration_seconds": 6.733333333333333,
+    "width": 1920,
+    "height": 1080
+  },
+  "test_file": {
+    "path": "data\\pixelated.mp4",
+    "fps": 30.0,
+    "frame_count": 201,
+    "duration_seconds": 6.7,
+    "width": 1920,
+    "height": 1080
+  },
+  "synchronization": {
+    "method": "block_correlation",
+    "detected_offset_frames": -1,
+    "offset_convention": "positive offset means: ref_index = test_index + offset (i.e., the reference needs to be advanced by `offset` frames to align with the test stream)",
+    "is_confident": false,
+    "confidence_margin": 0.006602660783033325,
+    "min_required_confidence_margin": 0.1,
+    "best_mean_distance": 0.03827526906068557,
+    "second_best_mean_distance": 0.03852966738450858,
+    "frames_used_reference": 200,
+    "frames_used_test": 200
+  },
+  "distance_curve": [
+    {
+      "offset": -30,
+      "mean_distance": 0.068956163630154,
+      "n_pairs_compared": 170
+    },
+    {
+      "offset": -29,
+      "mean_distance": 0.06785481972922836,
+      "n_pairs_compared": 171
+    },
+    {
+      "offset": -28,
+      "mean_distance": 0.06677909116416048,
+      "n_pairs_compared": 172
+    },
+    {
+      "offset": -27,
+      "mean_distance": 0.065760307817189,
+      "n_pairs_compared": 173
+    },
+    {
+      "offset": -26,
+      "mean_distance": 0.06459517246545676,
+      "n_pairs_compared": 174
+    },
+    {
+      "offset": -25,
+      "mean_distance": 0.06348069519935995,
+      "n_pairs_compared": 175
+    },
+    {
+      "offset": -24,
+      "mean_distance": 0.06240743744640165,
+      "n_pairs_compared": 176
+    },
+    {
+      "offset": -23,
+      "mean_distance": 0.06134429564050792,
+      "n_pairs_compared": 177
+    },
+    {
+      "offset": -22,
+      "mean_distance": 0.06049234080715349,
+      "n_pairs_compared": 178
+    },
+    {
+      "offset": -21,
+      "mean_distance": 0.05961731471327736,
+      "n_pairs_compared": 179
+    },
+    {
+      "offset": -20,
+      "mean_distance": 0.058761947836194706,
+      "n_pairs_compared": 180
+    },
+    {
+      "offset": -19,
+      "mean_distance": 0.05787821691640638,
+      "n_pairs_compared": 181
+    },
+    {
+      "offset": -18,
+      "mean_distance": 0.057008641009688166,
+      "n_pairs_compared": 182
+    },
+    {
+      "offset": -17,
+      "mean_distance": 0.056217089567563217,
+      "n_pairs_compared": 183
+    },
+    {
+      "offset": -16,
+      "mean_distance": 0.055457504004022495,
+      "n_pairs_compared": 184
+    },
+    {
+      "offset": -15,
+      "mean_distance": 0.05461857855192087,
+      "n_pairs_compared": 185
+    },
+    {
+      "offset": -14,
+      "mean_distance": 0.05371481924253518,
+      "n_pairs_compared": 186
+    },
+    {
+      "offset": -13,
+      "mean_distance": 0.05269073803355118,
+      "n_pairs_compared": 187
+    },
+    {
+      "offset": -12,
+      "mean_distance": 0.05156743618370463,
+      "n_pairs_compared": 188
+    },
+    {
+      "offset": -11,
+      "mean_distance": 0.050394754337413805,
+      "n_pairs_compared": 189
+    },
+    {
+      "offset": -10,
+      "mean_distance": 0.0490648673615286,
+      "n_pairs_compared": 190
+    },
+    {
+      "offset": -9,
+      "mean_distance": 0.04766268903669246,
+      "n_pairs_compared": 191
+    },
+    {
+      "offset": -8,
+      "mean_distance": 0.04612219802609607,
+      "n_pairs_compared": 192
+    },
+    {
+      "offset": -7,
+      "mean_distance": 0.044640739566148446,
+      "n_pairs_compared": 193
+    },
+    {
+      "offset": -6,
+      "mean_distance": 0.043111500065377006,
+      "n_pairs_compared": 194
+    },
+    {
+      "offset": -5,
+      "mean_distance": 0.0416603101746893,
+      "n_pairs_compared": 195
+    },
+    {
+      "offset": -4,
+      "mean_distance": 0.0402905172939656,
+      "n_pairs_compared": 196
+    },
+    {
+      "offset": -3,
+      "mean_distance": 0.03923288191520502,
+      "n_pairs_compared": 197
+    },
+    {
+      "offset": -2,
+      "mean_distance": 0.03852966738450858,
+      "n_pairs_compared": 198
+    },
+    {
+      "offset": -1,
+      "mean_distance": 0.03827526906068557,
+      "n_pairs_compared": 199
+    },
+    {
+      "offset": 0,
+      "mean_distance": 0.043188155787350024,
+      "n_pairs_compared": 200
+    },
+    {
+      "offset": 1,
+      "mean_distance": 0.04394062072364857,
+      "n_pairs_compared": 199
+    },
+    {
+      "offset": 2,
+      "mean_distance": 0.04506982897368983,
+      "n_pairs_compared": 198
+    },
+    {
+      "offset": 3,
+      "mean_distance": 0.04663537105518156,
+      "n_pairs_compared": 197
+    },
+    {
+      "offset": 4,
+      "mean_distance": 0.04839987263608059,
+      "n_pairs_compared": 196
+    },
+    {
+      "offset": 5,
+      "mean_distance": 0.05033583468791214,
+      "n_pairs_compared": 195
+    },
+    {
+      "offset": 6,
+      "mean_distance": 0.0524659646935719,
+      "n_pairs_compared": 194
+    },
+    {
+      "offset": 7,
+      "mean_distance": 0.05457111529023939,
+      "n_pairs_compared": 193
+    },
+    {
+      "offset": 8,
+      "mean_distance": 0.056672935920959566,
+      "n_pairs_compared": 192
+    },
+    {
+      "offset": 9,
+      "mean_distance": 0.0587461137815708,
+      "n_pairs_compared": 191
+    },
+    {
+      "offset": 10,
+      "mean_distance": 0.0606410061253807,
+      "n_pairs_compared": 190
+    },
+    {
+      "offset": 11,
+      "mean_distance": 0.06245907164093256,
+      "n_pairs_compared": 189
+    },
+    {
+      "offset": 12,
+      "mean_distance": 0.06410089998250534,
+      "n_pairs_compared": 188
+    },
+    {
+      "offset": 13,
+      "mean_distance": 0.06558627177299214,
+      "n_pairs_compared": 187
+    },
+    {
+      "offset": 14,
+      "mean_distance": 0.06689645497772945,
+      "n_pairs_compared": 186
+    },
+    {
+      "offset": 15,
+      "mean_distance": 0.06815292118580685,
+      "n_pairs_compared": 185
+    },
+    {
+      "offset": 16,
+      "mean_distance": 0.06932626052477575,
+      "n_pairs_compared": 184
+    },
+    {
+      "offset": 17,
+      "mean_distance": 0.07052335285491762,
+      "n_pairs_compared": 183
+    },
+    {
+      "offset": 18,
+      "mean_distance": 0.07164467481901649,
+      "n_pairs_compared": 182
+    },
+    {
+      "offset": 19,
+      "mean_distance": 0.07274382382767874,
+      "n_pairs_compared": 181
+    },
+    {
+      "offset": 20,
+      "mean_distance": 0.07385207061147858,
+      "n_pairs_compared": 180
+    },
+    {
+      "offset": 21,
+      "mean_distance": 0.07499929303881048,
+      "n_pairs_compared": 179
+    },
+    {
+      "offset": 22,
+      "mean_distance": 0.07625578673763889,
+      "n_pairs_compared": 178
+    },
+    {
+      "offset": 23,
+      "mean_distance": 0.07747208169034525,
+      "n_pairs_compared": 177
+    },
+    {
+      "offset": 24,
+      "mean_distance": 0.07874973806796415,
+      "n_pairs_compared": 176
+    },
+    {
+      "offset": 25,
+      "mean_distance": 0.08001606583071363,
+      "n_pairs_compared": 175
+    },
+    {
+      "offset": 26,
+      "mean_distance": 0.08126603760600426,
+      "n_pairs_compared": 174
+    },
+    {
+      "offset": 27,
+      "mean_distance": 0.08251148442608192,
+      "n_pairs_compared": 173
+    },
+    {
+      "offset": 28,
+      "mean_distance": 0.0837413821150188,
+      "n_pairs_compared": 172
+    },
+    {
+      "offset": 29,
+      "mean_distance": 0.08479033576154349,
+      "n_pairs_compared": 171
+    },
+    {
+      "offset": 30,
+      "mean_distance": 0.08596417911553744,
+      "n_pairs_compared": 170
+    }
+  ],
+  "config_used": {
+    "sync_window_frames": 200,
+    "max_offset_frames": 30,
+    "block_grid_size": 16,
+    "min_confidence_margin": 0.1
+  }
+}

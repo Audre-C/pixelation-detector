@@ -1,0 +1,364 @@
+"""
+pixelation_detector/metrics/ssim_local.py
+===========================================
+
+Local Structural Similarity (SSIM) — the spatial-localization metric.
+
+ROLE IN THIS PIPELINE:
+------------------------
+SSIM is the metric that answers WHERE the test frame structurally diverges
+from the reference, not just whether it does (PSNR) or whether the divergence
+is grid-periodic (blockiness/BDS). It is computed as a per-pixel SSIM MAP,
+not a single global number, so that downstream stages can:
+
+  1. Localize damage: identify the connected regions of the frame whose local
+     structure collapsed, giving an artifact bounding box for the event
+     report and overlay visualizations.
+  2. Quantify extent: report what FRACTION of the frame diverged, which feeds
+     the "affected area" sub-signal of the Phase 6 score.
+  3. Restrict other metrics: a later pipeline step can run blockiness only
+     inside an SSIM-flagged divergent region, focusing the pixelation-specific
+     test where structure actually broke.
+
+SSIM is sensitive to STRUCTURAL change (loss of local luminance/contrast/
+correlation), which is precisely what macroblock smearing, blurring, and
+blocking destroy — but it is content-general, so it also responds to any other
+structural difference. It localizes; blockiness discriminates. They are
+complementary, which is why both exist.
+
+MATHEMATICAL DEFINITION:
+--------------------------
+For each pixel, SSIM compares the reference and test within a local window
+(Gaussian-weighted by default, per config) using the standard Wang et al.
+formulation combining local means, variances, and covariance. The result is
+a map S in [-1, 1] (1 = locally identical). The global mean SSIM (mean over
+the valid interior, as returned by scikit-image) is reported alongside the
+map as the single-number summary.
+
+This module delegates the SSIM computation itself to
+scikit-image's structural_similarity (full=True), which is the reference
+implementation — we do not reimplement the windowed statistics. What this
+module OWNS is (a) input validation and dtype/channel discipline consistent
+with the other metrics, and (b) the divergent-region extraction on top of the
+map, which is this pipeline's own concern.
+
+DIVERGENT-REGION EXTRACTION (locked decision):
+------------------------------------------------
+A pixel is "divergent" iff its local SSIM is at or below
+config.SSIM_DIVERGENCE_THRESHOLD. The boolean divergence mask is segmented
+into connected components; components smaller than
+config.SSIM_REGION_MIN_AREA_PX pixels are discarded as speckle (isolated
+single-pixel dips are almost always coding noise, not a real artifact patch).
+Each surviving component is reported as a DivergentRegion with its bounding
+box, area, and the mean/min SSIM inside it (min = worst pixel, the most
+useful severity indicator for that patch).
+
+The region-extraction helper operates on ANY SSIM map array, so it can be
+unit-tested in isolation against synthetic maps without running SSIM at all.
+
+CHANNEL CONVENTION:
+---------------------
+Luminance/grayscale only, consistent with psnr.py and blockiness.py. Callers
+convert color frames to a single-channel 2D array before calling.
+
+REGION RESTRICTION:
+---------------------
+compute_ssim_map / compute_local_ssim operate on whatever 2D region is passed
+in (full frame or crop). Region SELECTION is a pipeline-level concern; this
+module only computes the map and segments it.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+import numpy as np
+from skimage.measure import label, regionprops
+from skimage.metrics import structural_similarity
+
+from pixelation_detector.config import MetricsConfig
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DivergentRegion:
+    """
+    A single connected region of the frame whose local SSIM fell at or below
+    the divergence threshold.
+
+    bbox: (row0, col0, row1, col1) in scikit-image half-open convention, i.e.
+        rows [row0, row1) and cols [col0, col1). Slicing ssim_map[row0:row1,
+        col0:col1] yields the region's bounding box.
+    area_px: number of divergent pixels in the connected component (NOT the
+        bounding-box area; the component may be non-rectangular).
+    mean_ssim: mean local SSIM over the component's divergent pixels.
+    min_ssim: minimum (worst) local SSIM in the component — the single most
+        useful per-region severity indicator.
+    """
+    bbox: Tuple[int, int, int, int]
+    area_px: int
+    mean_ssim: float
+    min_ssim: float
+
+
+@dataclass
+class SSIMResult:
+    """
+    Result of a local-SSIM computation on a reference/test frame pair (or
+    region).
+
+    mean_ssim: global mean SSIM (scikit-image's interior-cropped mean), the
+        single-number summary in [-1, 1] (1 = identical).
+    ssim_map: the full per-pixel SSIM map, same (H, W) shape as the inputs.
+        Exposed for visualization and for restricting other metrics to
+        divergent areas.
+    divergent_fraction: fraction of map pixels at/below the divergence
+        threshold (in [0, 1]). The "affected area" diagnostic; computed over
+        the WHOLE map, independent of the min-area region filter.
+    divergent_regions: connected divergent components surviving the min-area
+        filter, sorted by area descending (largest/most prominent first).
+    """
+    mean_ssim: float
+    ssim_map: np.ndarray
+    divergent_fraction: float
+    divergent_regions: List[DivergentRegion]
+
+
+def _validate_pair(
+    reference_frame_gray: np.ndarray, test_frame_gray: np.ndarray, win_size: int
+) -> None:
+    """
+    Shared input validation for the SSIM computation: both inputs must be 2D,
+    identically shaped, non-empty, and large enough for the SSIM window.
+    Raises ValueError with a specific message on any violation.
+    """
+    if reference_frame_gray.ndim != 2 or test_frame_gray.ndim != 2:
+        logger.error(
+            "SSIM received non-2D input: reference ndim=%d, test ndim=%d.",
+            reference_frame_gray.ndim,
+            test_frame_gray.ndim,
+        )
+        raise ValueError(
+            "compute_ssim_map requires 2D (grayscale) input arrays. Convert "
+            "color frames to grayscale before calling."
+        )
+
+    if reference_frame_gray.shape != test_frame_gray.shape:
+        logger.error(
+            "SSIM shape mismatch: reference=%s test=%s",
+            reference_frame_gray.shape,
+            test_frame_gray.shape,
+        )
+        raise ValueError(
+            f"compute_ssim_map: reference shape {reference_frame_gray.shape} "
+            f"does not match test shape {test_frame_gray.shape}."
+        )
+
+    if reference_frame_gray.size == 0:
+        logger.error("SSIM received an empty (zero-pixel) input.")
+        raise ValueError(
+            "compute_ssim_map: input arrays are empty (zero pixels); SSIM is "
+            "undefined."
+        )
+
+    smaller_side = min(reference_frame_gray.shape)
+    if smaller_side < win_size:
+        logger.error(
+            "SSIM window (%d) larger than smaller image side (%d).",
+            win_size,
+            smaller_side,
+        )
+        raise ValueError(
+            f"compute_ssim_map: SSIM window size {win_size} exceeds the "
+            f"smaller image dimension {smaller_side}. Use a smaller "
+            f"SSIM_WINDOW_SIZE or a larger region."
+        )
+
+
+def compute_ssim_map(
+    reference_frame_gray: np.ndarray,
+    test_frame_gray: np.ndarray,
+    config: Optional[MetricsConfig] = None,
+) -> Tuple[float, np.ndarray]:
+    """
+    Compute the global mean SSIM and the full per-pixel SSIM map for a
+    reference/test grayscale frame pair.
+
+    Args:
+        reference_frame_gray: 2D numpy array (H, W), single-channel.
+        test_frame_gray: 2D numpy array (H, W), identical shape.
+        config: MetricsConfig supplying SSIM_WINDOW_SIZE,
+            SSIM_USE_GAUSSIAN_WEIGHTS, SSIM_GAUSSIAN_SIGMA, SSIM_DATA_RANGE.
+            Uses defaults if not provided.
+
+    Returns:
+        (mean_ssim, ssim_map): the scalar global mean SSIM and the (H, W) map.
+
+    Raises:
+        ValueError: on non-2D input, shape mismatch, empty input, or a window
+            larger than the image.
+    """
+    config = config or MetricsConfig()
+    win_size = config.SSIM_WINDOW_SIZE
+
+    _validate_pair(reference_frame_gray, test_frame_gray, win_size)
+
+    # Cast to float64 for a stable, dtype-independent computation; data_range
+    # is supplied explicitly so the cast does not change the SSIM values.
+    ref = reference_frame_gray.astype(np.float64)
+    test = test_frame_gray.astype(np.float64)
+
+    mean_ssim, ssim_map = structural_similarity(
+        ref,
+        test,
+        win_size=win_size,
+        gaussian_weights=config.SSIM_USE_GAUSSIAN_WEIGHTS,
+        sigma=config.SSIM_GAUSSIAN_SIGMA,
+        data_range=config.SSIM_DATA_RANGE,
+        full=True,
+    )
+
+    logger.debug(
+        "SSIM map computed for shape %s: mean_ssim=%.4f, map range "
+        "[%.4f, %.4f]",
+        reference_frame_gray.shape,
+        mean_ssim,
+        float(ssim_map.min()),
+        float(ssim_map.max()),
+    )
+
+    return float(mean_ssim), ssim_map
+
+
+def extract_divergent_regions(
+    ssim_map: np.ndarray,
+    config: Optional[MetricsConfig] = None,
+) -> List[DivergentRegion]:
+    """
+    Segment an SSIM map into connected regions of low (divergent) similarity.
+
+    A pixel is divergent iff ssim_map[p] <= config.SSIM_DIVERGENCE_THRESHOLD.
+    Connected components smaller than config.SSIM_REGION_MIN_AREA_PX pixels are
+    discarded. Surviving components are returned sorted by area descending.
+
+    This helper operates on any 2D SSIM map, independent of how it was
+    produced, so it is unit-testable against synthetic maps.
+
+    Args:
+        ssim_map: 2D numpy array of local SSIM values (typically in [-1, 1]).
+        config: MetricsConfig supplying SSIM_DIVERGENCE_THRESHOLD and
+            SSIM_REGION_MIN_AREA_PX. Uses defaults if not provided.
+
+    Returns:
+        List of DivergentRegion, largest area first. Empty if nothing diverges
+        (or every divergent component is below the min-area threshold).
+
+    Raises:
+        ValueError: if ssim_map is not 2-dimensional.
+    """
+    config = config or MetricsConfig()
+
+    if ssim_map.ndim != 2:
+        logger.error(
+            "extract_divergent_regions received non-2D map: ndim=%d",
+            ssim_map.ndim,
+        )
+        raise ValueError("extract_divergent_regions requires a 2D SSIM map.")
+
+    threshold = config.SSIM_DIVERGENCE_THRESHOLD
+    min_area = config.SSIM_REGION_MIN_AREA_PX
+
+    divergent_mask = ssim_map <= threshold
+
+    if not divergent_mask.any():
+        logger.debug(
+            "No divergent pixels (threshold=%.3f); no regions.", threshold
+        )
+        return []
+
+    # Connected-component labeling (8-connectivity, scikit-image default for
+    # 2D). Each label is one candidate region.
+    labels = label(divergent_mask)
+
+    regions: List[DivergentRegion] = []
+    for props in regionprops(labels):
+        if props.area < min_area:
+            continue
+        component_mask = labels == props.label
+        component_values = ssim_map[component_mask]
+        regions.append(
+            DivergentRegion(
+                bbox=tuple(int(v) for v in props.bbox),  # (r0, c0, r1, c1)
+                area_px=int(props.area),
+                mean_ssim=float(component_values.mean()),
+                min_ssim=float(component_values.min()),
+            )
+        )
+
+    regions.sort(key=lambda r: r.area_px, reverse=True)
+
+    logger.debug(
+        "Divergent regions: %d candidate component(s), %d surviving "
+        "min_area=%d (threshold=%.3f).",
+        int(labels.max()),
+        len(regions),
+        min_area,
+        threshold,
+    )
+
+    return regions
+
+
+def compute_local_ssim(
+    reference_frame_gray: np.ndarray,
+    test_frame_gray: np.ndarray,
+    config: Optional[MetricsConfig] = None,
+) -> SSIMResult:
+    """
+    Full local-SSIM analysis for a reference/test grayscale frame pair: the
+    mean SSIM, the per-pixel map, the divergent-area fraction, and the
+    extracted divergent regions. This is the convenient single-call entry
+    point that orchestrates compute_ssim_map + extract_divergent_regions.
+
+    Args:
+        reference_frame_gray: 2D numpy array (H, W), single-channel.
+        test_frame_gray: 2D numpy array (H, W), identical shape.
+        config: MetricsConfig. Uses defaults if not provided.
+
+    Returns:
+        SSIMResult with mean_ssim, ssim_map, divergent_fraction, and
+        divergent_regions.
+
+    Raises:
+        ValueError: on non-2D input, shape mismatch, empty input, or a window
+            larger than the image.
+    """
+    config = config or MetricsConfig()
+
+    mean_ssim, ssim_map = compute_ssim_map(
+        reference_frame_gray, test_frame_gray, config
+    )
+
+    divergent_fraction = float(
+        np.mean(ssim_map <= config.SSIM_DIVERGENCE_THRESHOLD)
+    )
+    divergent_regions = extract_divergent_regions(ssim_map, config)
+
+    logger.debug(
+        "Local SSIM result for shape %s: mean_ssim=%.4f, divergent_fraction="
+        "%.4f, n_regions=%d",
+        reference_frame_gray.shape,
+        mean_ssim,
+        divergent_fraction,
+        len(divergent_regions),
+    )
+
+    return SSIMResult(
+        mean_ssim=mean_ssim,
+        ssim_map=ssim_map,
+        divergent_fraction=divergent_fraction,
+        divergent_regions=divergent_regions,
+    )

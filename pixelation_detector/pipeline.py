@@ -76,6 +76,7 @@ from pixelation_detector.scoring.confidence import (
 from pixelation_detector.alarms.alarm_manager import AlarmManager
 from pixelation_detector.alarms import sinks
 from pixelation_detector.alarms.event import Event
+from pixelation_detector.visualization.manager import VisualizationManager
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +333,16 @@ class PixelationDetectionPipeline:
                 "Pipeline complete: %d frame(s), %d event(s). Artifacts in %s",
                 len(rows), len(events), output_dir,
             )
+
+            viz = VisualizationManager(self.config)
+            viz.generate_all(
+                rows=rows,
+                events=events,
+                reference_path=reference_path,
+                test_path=test_path,
+                output_dir=output_dir,
+            )
+
             return report
         finally:
             reference_source.close()

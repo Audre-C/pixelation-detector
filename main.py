@@ -144,9 +144,13 @@ def print_console_summary(report: Dict[str, Any], output_dir: str) -> None:
         print("\n  No pixelation events detected.")
 
     print(f"\nArtifacts written to: {output_dir}/")
-    print("  - metrics.csv   (per-frame metrics)")
-    print("  - events.csv    (detected events)")
-    print("  - report.json   (full report)")
+    print("  - metrics.csv              (per-frame metrics)")
+    print("  - events.csv               (detected events)")
+    print("  - report.json              (full report)")
+    print("  - metric_timeseries.png    (PSNR / SSIM / ΔBDS over time)")
+    print("  - confidence_timeline.png  (FinalScore timeline with events)")
+    print("  - sanity_check.png         (reference-vs-reference control)")
+    print("  - event_overlays/          (per-event peak-frame overlays)")
     print("=" * 70 + "\n")
 
 

@@ -428,10 +428,10 @@ class ScoringConfig:
     predictable, interpretable range before scaling.
     """
 
-    WEIGHT_BLOCKINESS: float = 0.45        # w1: ΔBDS magnitude
-    WEIGHT_AREA: float = 0.15              # w2: fraction of frame affected
-    WEIGHT_SSIM_DIVERGENCE: float = 0.20   # w3: structural divergence
-    WEIGHT_PERSISTENCE: float = 0.20       # w4: temporal persistence P(t)
+WEIGHT_BLOCKINESS: float = 0.30        # was 0.45
+WEIGHT_AREA: float = 0.25              # was 0.15
+WEIGHT_SSIM_DIVERGENCE: float = 0.35   # was 0.20
+WEIGHT_PERSISTENCE: float = 0.10       # was 0.20
 
     # Window (frames) over which the persistence factor P(t) is computed: an
     # artifact sustained across multiple frames is more credible (and more
@@ -483,7 +483,7 @@ class AlarmConfig:
     # Per-frame score at/above which a frame is considered "in alarm."
     # Aligned with the low/medium severity boundary so the weakest reported
     # events are at least "low" severity.
-    EVENT_TRIGGER_SCORE: float = 35.0
+    EVENT_TRIGGER_SCORE: float = 20.0
 
     # Maximum number of consecutive sub-threshold frames tolerated inside a
     # single event before it is split. WHY 3: bridges momentary score dips
@@ -500,8 +500,8 @@ class AlarmConfig:
     #   score <  LOW_MEDIUM_BOUNDARY               -> (below trigger / none)
     #   LOW_MEDIUM_BOUNDARY <= score < MEDIUM_HIGH -> medium
     #   score >= MEDIUM_HIGH_BOUNDARY              -> high
-    LOW_MEDIUM_BOUNDARY: int = 35
-    MEDIUM_HIGH_BOUNDARY: int = 70
+    LOW_MEDIUM_BOUNDARY: int = 20
+    MEDIUM_HIGH_BOUNDARY: int = 50
 
     def __post_init__(self) -> None:
         if self.EVENT_TRIGGER_SCORE < 0:

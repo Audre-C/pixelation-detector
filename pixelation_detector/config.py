@@ -44,6 +44,7 @@ WHAT IS LIVE AS OF THIS STEP (Phase 2):
 
 FORWARD-LOOKING (defined here, not yet consumed by any code):
   - CutDetectorConfig (detection/cut_detector.py)
+  - ROIConfig         (detection/roi_mask.py)
   - BaselineConfig    (detection/baseline.py)
   - ScoringConfig     (scoring/{confidence,temporal_filter}.py)
   - AlarmConfig       (alarms/{event,alarm_manager}.py)
@@ -292,6 +293,70 @@ class CutDetectorConfig:
 
 
 # ---------------------------------------------------------------------------
+# Region-of-interest / exclusion-zone configuration
+# (consumed by detection/roi_mask.py)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ROIConfig:
+    """
+    Configuration for ROIMaskManager (config-driven exclusion zones).
+
+    PURPOSE: broadcast frames carry persistent on-screen graphics — tickers,
+    station logos/bugs, score boxes, watermarks — that legitimately differ
+    between reference and test (or animate independently of the program video)
+    and would otherwise generate constant false pixelation alarms. These
+    regions are EXCLUDED from analysis.
+
+    Zones are given in NORMALIZED coordinates (fractions of width/height) so a
+    layout defined once applies at any resolution (720p, 1080p, ...). Each zone
+    is a 4-tuple (top, left, bottom, right) with
+        0.0 <= top  < bottom <= 1.0
+        0.0 <= left < right  <= 1.0
+    covering rows [top*H, bottom*H) and columns [left*W, right*W). Default: no
+    zones, i.e. the entire frame is analyzed.
+
+    Example — exclude the bottom 12% (a lower-third ticker) and a top-left bug:
+        ROIConfig(EXCLUSION_ZONES_NORMALIZED=(
+            (0.88, 0.0, 1.0, 1.0),    # bottom ticker band
+            (0.02, 0.02, 0.12, 0.18), # top-left logo
+        ))
+    """
+
+    EXCLUSION_ZONES_NORMALIZED: Tuple[
+        Tuple[float, float, float, float], ...
+    ] = ()
+
+    def __post_init__(self) -> None:
+        for i, zone in enumerate(self.EXCLUSION_ZONES_NORMALIZED):
+            if len(zone) != 4:
+                raise ValueError(
+                    f"ROI exclusion zone {i} must have 4 values "
+                    f"(top, left, bottom, right), got {len(zone)}."
+                )
+            top, left, bottom, right = zone
+            for name, value in (
+                ("top", top),
+                ("left", left),
+                ("bottom", bottom),
+                ("right", right),
+            ):
+                if not (0.0 <= value <= 1.0):
+                    raise ValueError(
+                        f"ROI zone {i} {name}={value} is outside the "
+                        f"normalized range [0, 1]."
+                    )
+            if not top < bottom:
+                raise ValueError(
+                    f"ROI zone {i}: top ({top}) must be < bottom ({bottom})."
+                )
+            if not left < right:
+                raise ValueError(
+                    f"ROI zone {i}: left ({left}) must be < right ({right})."
+                )
+
+
+# ---------------------------------------------------------------------------
 # Rolling-baseline configuration
 # (FORWARD-LOOKING — consumed later by detection/baseline.py)
 # ---------------------------------------------------------------------------
@@ -363,10 +428,10 @@ class ScoringConfig:
     predictable, interpretable range before scaling.
     """
 
-    WEIGHT_BLOCKINESS: float = 0.45        # w1: ΔBDS magnitude
-    WEIGHT_AREA: float = 0.15              # w2: fraction of frame affected
-    WEIGHT_SSIM_DIVERGENCE: float = 0.20   # w3: structural divergence
-    WEIGHT_PERSISTENCE: float = 0.20       # w4: temporal persistence P(t)
+    WEIGHT_BLOCKINESS: float = 0.30        # was 0.45
+    WEIGHT_AREA: float = 0.25              # was 0.15
+    WEIGHT_SSIM_DIVERGENCE: float = 0.35   # was 0.20
+    WEIGHT_PERSISTENCE: float = 0.10       # was 0.20
 
     # Window (frames) over which the persistence factor P(t) is computed: an
     # artifact sustained across multiple frames is more credible (and more
@@ -418,7 +483,7 @@ class AlarmConfig:
     # Per-frame score at/above which a frame is considered "in alarm."
     # Aligned with the low/medium severity boundary so the weakest reported
     # events are at least "low" severity.
-    EVENT_TRIGGER_SCORE: float = 35.0
+    EVENT_TRIGGER_SCORE: float = 20.0
 
     # Maximum number of consecutive sub-threshold frames tolerated inside a
     # single event before it is split. WHY 3: bridges momentary score dips
@@ -435,8 +500,8 @@ class AlarmConfig:
     #   score <  LOW_MEDIUM_BOUNDARY               -> (below trigger / none)
     #   LOW_MEDIUM_BOUNDARY <= score < MEDIUM_HIGH -> medium
     #   score >= MEDIUM_HIGH_BOUNDARY              -> high
-    LOW_MEDIUM_BOUNDARY: int = 35
-    MEDIUM_HIGH_BOUNDARY: int = 70
+    LOW_MEDIUM_BOUNDARY: int = 20
+    MEDIUM_HIGH_BOUNDARY: int = 50
 
     def __post_init__(self) -> None:
         if self.EVENT_TRIGGER_SCORE < 0:
@@ -469,6 +534,7 @@ class PipelineConfig:
     io: IOConfig = field(default_factory=IOConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     cut: CutDetectorConfig = field(default_factory=CutDetectorConfig)
+    roi: ROIConfig = field(default_factory=ROIConfig)
     baseline: BaselineConfig = field(default_factory=BaselineConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     alarms: AlarmConfig = field(default_factory=AlarmConfig)

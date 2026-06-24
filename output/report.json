@@ -1,0 +1,164 @@
+{
+  "summary": {
+    "total_frames": 201,
+    "total_events": 7,
+    "flagged_frames": 167,
+    "flagged_fraction": 0.8308457711442786,
+    "events_by_severity": {
+      "low": 0,
+      "medium": 6,
+      "high": 1
+    }
+  },
+  "events": [
+    {
+      "event_id": 1,
+      "start_frame": 2,
+      "end_frame": 7,
+      "duration_frames": 6,
+      "peak_frame": 4,
+      "peak_score": 24.627729679020735,
+      "mean_score": 21.885162304273745,
+      "severity": "medium",
+      "start_time_s": 0.06666666666666667,
+      "end_time_s": 0.23333333333333334
+    },
+    {
+      "event_id": 2,
+      "start_frame": 12,
+      "end_frame": 60,
+      "duration_frames": 49,
+      "peak_frame": 31,
+      "peak_score": 30.52652544047062,
+      "mean_score": 23.42563873433961,
+      "severity": "medium",
+      "start_time_s": 0.4,
+      "end_time_s": 2.0
+    },
+    {
+      "event_id": 3,
+      "start_frame": 66,
+      "end_frame": 68,
+      "duration_frames": 3,
+      "peak_frame": 68,
+      "peak_score": 21.550347879837478,
+      "mean_score": 20.984168409165587,
+      "severity": "medium",
+      "start_time_s": 2.2,
+      "end_time_s": 2.2666666666666666
+    },
+    {
+      "event_id": 4,
+      "start_frame": 73,
+      "end_frame": 91,
+      "duration_frames": 19,
+      "peak_frame": 75,
+      "peak_score": 27.775954691647552,
+      "mean_score": 22.451258670975513,
+      "severity": "medium",
+      "start_time_s": 2.433333333333333,
+      "end_time_s": 3.033333333333333
+    },
+    {
+      "event_id": 5,
+      "start_frame": 99,
+      "end_frame": 102,
+      "duration_frames": 4,
+      "peak_frame": 100,
+      "peak_score": 23.71640936660238,
+      "mean_score": 23.211537111767612,
+      "severity": "medium",
+      "start_time_s": 3.3,
+      "end_time_s": 3.4
+    },
+    {
+      "event_id": 6,
+      "start_frame": 110,
+      "end_frame": 135,
+      "duration_frames": 26,
+      "peak_frame": 127,
+      "peak_score": 30.60120434563125,
+      "mean_score": 21.90545260426344,
+      "severity": "medium",
+      "start_time_s": 3.6666666666666665,
+      "end_time_s": 4.5
+    },
+    {
+      "event_id": 7,
+      "start_frame": 141,
+      "end_frame": 200,
+      "duration_frames": 60,
+      "peak_frame": 200,
+      "peak_score": 64.53963206753433,
+      "mean_score": 24.62143651258322,
+      "severity": "high",
+      "start_time_s": 4.7,
+      "end_time_s": 6.666666666666667
+    }
+  ],
+  "metadata": {
+    "reference_path": "data/original.mp4",
+    "test_path": "data/pixelated.mp4",
+    "reference_fps": 30.0,
+    "reference_frame_count": 202,
+    "test_frame_count": 201,
+    "frames_analyzed": 201,
+    "width": 1920,
+    "height": 1080
+  },
+  "config": {
+    "io": {
+      "TRUST_OPENCV_METADATA": true
+    },
+    "metrics": {
+      "PSNR_MAX_PIXEL_VALUE": 255.0,
+      "PSNR_PERFECT_MATCH_DB": 100.0,
+      "PSNR_GATE_DB": 38.0,
+      "SSIM_WINDOW_SIZE": 7,
+      "SSIM_USE_GAUSSIAN_WEIGHTS": true,
+      "SSIM_GAUSSIAN_SIGMA": 1.5,
+      "SSIM_DATA_RANGE": 255.0,
+      "SSIM_DIVERGENCE_THRESHOLD": 0.85,
+      "SSIM_REGION_MIN_AREA_PX": 64,
+      "BLOCKINESS_CANDIDATE_SIZES": [
+        8,
+        16
+      ],
+      "BLOCKINESS_EPSILON": 1.0,
+      "BLOCKINESS_DELTA_CLIP": [
+        0.0,
+        5.0
+      ],
+      "BLOCKINESS_BORDER_MARGIN_PIXELS": 3
+    },
+    "cut": {
+      "HIST_BINS": 64,
+      "INTERSECTION_CUT_THRESHOLD": 0.5
+    },
+    "roi": {
+      "EXCLUSION_ZONES_NORMALIZED": []
+    },
+    "baseline": {
+      "WINDOW_FRAMES": 30,
+      "MIN_SAMPLES_FOR_BASELINE": 10,
+      "Z_SCORE_THRESHOLD": 3.5,
+      "MAD_SCALE_FACTOR": 1.4826,
+      "EPSILON": 1e-06
+    },
+    "scoring": {
+      "WEIGHT_BLOCKINESS": 0.3,
+      "WEIGHT_AREA": 0.25,
+      "WEIGHT_SSIM_DIVERGENCE": 0.35,
+      "WEIGHT_PERSISTENCE": 0.1,
+      "PERSISTENCE_WINDOW_FRAMES": 5,
+      "SCORE_SCALE": 100.0
+    },
+    "alarms": {
+      "EVENT_TRIGGER_SCORE": 20.0,
+      "EVENT_GAP_TOLERANCE_FRAMES": 3,
+      "EVENT_MIN_DURATION_FRAMES": 2,
+      "LOW_MEDIUM_BOUNDARY": 20,
+      "MEDIUM_HIGH_BOUNDARY": 50
+    }
+  }
+}

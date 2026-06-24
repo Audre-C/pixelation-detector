@@ -1,52 +1,54 @@
+#!/usr/bin/env python3
 """
 main.py
 ========
 
-Phase 0 / Phase 1 entry point.
+Command-line entry point for the pixelation detector.
 
-SCOPE:
--------
-This script ONLY:
-    1. Opens original.mp4 (reference) and pixelated.mp4 (test).
-    2. Computes the frame offset between them using FrameSynchronizer
-       (block-correlation method: downsampled luma feature vectors +
-       normalized cross-correlation across a candidate offset sweep —
-       see pixelation_detector/io/sync.py).
-    3. Prints synchronization diagnostics to the console.
-    4. Saves a diagnostics report to disk containing: detected offset,
-       synchronization confidence, fps, frame counts, and duration for
-       both files.
+Compares a reference video against a test video FRAME-BY-FRAME (frame N vs
+frame N — no synchronization, by hard design constraint) and writes the
+explainable artifacts to an output directory:
 
-It does NOT compute any quality metrics, scores, alarms, or visualizations.
+    metrics.csv   one row per frame, every per-frame quantity
+    events.csv    one row per detected pixelation event
+    report.json   run metadata, config snapshot, severity summary, events
+
+Usage:
+    python main.py --reference data/original.mp4 --test data/pixelated.mp4
+    python main.py                      # uses the defaults above
+    python main.py --output results --log-level DEBUG
+
+This file is intentionally thin: all detection logic lives in
+pixelation_detector.pipeline.PixelationDetectionPipeline. main.py only parses
+arguments, configures logging, invokes the pipeline, and prints a human summary.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
-from dataclasses import asdict
-from pathlib import Path
 from typing import Any, Dict
 
-from pixelation_detector.config import DEFAULT_CONFIG, LOG_DATE_FORMAT, LOG_FORMAT, LOG_LEVEL
-from pixelation_detector.io.frame_source import FileFrameSource, VideoMetadata
-from pixelation_detector.io.sync import FrameSynchronizer, SyncResult
+from pixelation_detector.config import (
+    DEFAULT_CONFIG,
+    LOG_DATE_FORMAT,
+    LOG_FORMAT,
+    LOG_LEVEL,
+)
+from pixelation_detector.pipeline import PixelationDetectionPipeline
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("pixelation_detector.main")
 
 
-def configure_logging() -> None:
+def configure_logging(level_name: str) -> None:
     """
-    Set up logging for the whole run.
-
-    Each module does `logger = logging.getLogger(__name__)` and emits log
-    calls but does not configure handlers/formatting itself — that's the
-    entry point's job, configured once here.
+    Configure root logging once, here at the entry point. Libraries elsewhere
+    only call logging.getLogger(__name__); the format/handlers are owned here.
     """
+    level = getattr(logging, level_name.upper(), logging.INFO)
     logging.basicConfig(
-        level=getattr(logging, LOG_LEVEL),
+        level=level,
         format=LOG_FORMAT,
         datefmt=LOG_DATE_FORMAT,
         stream=sys.stdout,
@@ -56,222 +58,127 @@ def configure_logging() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Open reference and test videos, compute frame synchronization "
-            "offset via block-correlation, and produce a diagnostics report. "
-            "No quality metrics, scoring, or alarms are computed at this stage."
+            "Detect pixelation/macroblocking by comparing a reference video "
+            "against a test video frame-by-frame (no synchronization). Writes "
+            "metrics.csv, events.csv, and report.json to the output directory."
         )
     )
     parser.add_argument(
         "--reference",
         type=str,
         default="data/original.mp4",
-        help="Path to the clean reference video (default: data/original.mp4)",
+        help="Path to the clean reference video (default: data/original.mp4).",
     )
     parser.add_argument(
         "--test",
         type=str,
         default="data/pixelated.mp4",
-        help="Path to the potentially-degraded test video (default: data/pixelated.mp4)",
+        help=(
+            "Path to the potentially-degraded test video "
+            "(default: data/pixelated.mp4)."
+        ),
     )
     parser.add_argument(
         "--output",
         type=str,
-        default="output/sync_report.json",
-        help="Path to write the JSON diagnostics report (default: output/sync_report.json)",
+        default="output",
+        help="Directory for metrics.csv/events.csv/report.json (default: output).",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default=LOG_LEVEL,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help=f"Logging verbosity (default: {LOG_LEVEL}).",
     )
     return parser.parse_args()
 
 
-def metadata_to_dict(metadata: VideoMetadata) -> Dict[str, Any]:
-    """Convert VideoMetadata into a JSON-serializable dict."""
-    return asdict(metadata)
+def print_console_summary(report: Dict[str, Any], output_dir: str) -> None:
+    """Print a concise, human-readable summary of the run to stdout."""
+    summary = report["summary"]
+    metadata = report.get("metadata", {})
+    events = report["events"]
 
-
-def sync_result_to_dict(result: SyncResult) -> Dict[str, Any]:
-    """Convert SyncResult into a JSON-serializable dict."""
-    return asdict(result)
-
-
-def build_report(
-    reference_metadata: VideoMetadata,
-    test_metadata: VideoMetadata,
-    sync_result: SyncResult,
-) -> Dict[str, Any]:
-    """
-    Assemble the full diagnostics report structure:
-        - detected offset
-        - synchronization confidence
-        - fps (both files)
-        - frame counts (both files)
-        - duration (both files)
-
-    Plus the full distance curve and the config actually used to produce
-    this result. Every field referenced below exists on the current
-    SyncConfig (block-correlation method) — no deprecated pHash fields
-    (PHASH_SIZE, HASH_RESIZE, CONVERT_TO_GRAYSCALE) are referenced anywhere
-    in this report, since the synchronizer no longer computes or uses them.
-    """
-    report: Dict[str, Any] = {
-        "reference_file": {
-            "path": reference_metadata.path,
-            "fps": reference_metadata.fps,
-            "frame_count": reference_metadata.frame_count,
-            "duration_seconds": reference_metadata.duration_seconds,
-            "width": reference_metadata.width,
-            "height": reference_metadata.height,
-        },
-        "test_file": {
-            "path": test_metadata.path,
-            "fps": test_metadata.fps,
-            "frame_count": test_metadata.frame_count,
-            "duration_seconds": test_metadata.duration_seconds,
-            "width": test_metadata.width,
-            "height": test_metadata.height,
-        },
-        "synchronization": {
-            "method": "block_correlation",
-            "detected_offset_frames": sync_result.offset_frames,
-            "offset_convention": (
-                "positive offset means: ref_index = test_index + offset "
-                "(i.e., the reference needs to be advanced by `offset` frames "
-                "to align with the test stream)"
-            ),
-            "is_confident": sync_result.is_confident,
-            "confidence_margin": sync_result.confidence_margin,
-            "min_required_confidence_margin": DEFAULT_CONFIG.sync.MIN_CONFIDENCE_MARGIN,
-            "best_mean_distance": sync_result.best_mean_distance,
-            "second_best_mean_distance": sync_result.second_best_mean_distance,
-            "frames_used_reference": sync_result.frames_used_reference,
-            "frames_used_test": sync_result.frames_used_test,
-        },
-        "distance_curve": [
-            {
-                "offset": c.offset,
-                "mean_distance": c.mean_distance,
-                "n_pairs_compared": c.n_pairs_compared,
-            }
-            for c in sync_result.distance_curve
-        ],
-        "config_used": {
-            "sync_window_frames": DEFAULT_CONFIG.sync.SYNC_WINDOW_FRAMES,
-            "max_offset_frames": DEFAULT_CONFIG.sync.MAX_OFFSET_FRAMES,
-            "block_grid_size": DEFAULT_CONFIG.sync.BLOCK_GRID_SIZE,
-            "min_confidence_margin": DEFAULT_CONFIG.sync.MIN_CONFIDENCE_MARGIN,
-        },
-    }
-    return report
-
-
-def print_console_summary(
-    reference_metadata: VideoMetadata,
-    test_metadata: VideoMetadata,
-    sync_result: SyncResult,
-) -> None:
-    """
-    Human-readable console summary, separate from the detailed JSON report.
-    """
     print("\n" + "=" * 70)
-    print("PIXELATION DETECTOR — PHASE 1 SYNCHRONIZATION DIAGNOSTICS")
+    print("PIXELATION DETECTION — SUMMARY")
     print("=" * 70)
-
-    print("\n[Reference] {}".format(reference_metadata.path))
-    print(f"    fps            : {reference_metadata.fps:.3f}")
-    print(f"    frame_count    : {reference_metadata.frame_count}")
-    print(f"    resolution     : {reference_metadata.width}x{reference_metadata.height}")
-    print(f"    duration       : {reference_metadata.duration_seconds:.2f} s")
-
-    print("\n[Test] {}".format(test_metadata.path))
-    print(f"    fps            : {test_metadata.fps:.3f}")
-    print(f"    frame_count    : {test_metadata.frame_count}")
-    print(f"    resolution     : {test_metadata.width}x{test_metadata.height}")
-    print(f"    duration       : {test_metadata.duration_seconds:.2f} s")
-
-    print("\n[Synchronization Result] (method: block_correlation)")
-    print(f"    detected offset       : {sync_result.offset_frames:+d} frames")
+    print(f"Reference : {metadata.get('reference_path', '?')}")
+    print(f"Test      : {metadata.get('test_path', '?')}")
     print(
-        "        (convention: ref_index = test_index + offset; positive "
-        "means reference must advance to align with test)"
+        f"Resolution: {metadata.get('width', '?')}x{metadata.get('height', '?')}"
+        f"  @ {metadata.get('reference_fps', '?')} fps"
     )
-    print(f"    confidence margin     : {sync_result.confidence_margin * 100:.1f}%")
+    print(f"Frames    : {summary['total_frames']} analyzed")
+
+    by_sev = summary["events_by_severity"]
     print(
-        f"    confident?            : "
-        f"{'YES' if sync_result.is_confident else 'NO — review before trusting offset'}"
+        f"\nEvents    : {summary['total_events']} "
+        f"(high={by_sev['high']}, medium={by_sev['medium']}, low={by_sev['low']})"
     )
-    print(f"    best mean distance    : {sync_result.best_mean_distance:.4f}")
-    print(f"    runner-up mean dist.  : {sync_result.second_best_mean_distance:.4f}")
     print(
-        f"    frames used (ref/test): "
-        f"{sync_result.frames_used_reference} / {sync_result.frames_used_test}"
+        f"Flagged   : {summary['flagged_frames']} frame(s) "
+        f"({summary['flagged_fraction'] * 100:.2f}% of analyzed)"
     )
 
-    if not sync_result.is_confident:
-        print(
-            "\n    WARNING: synchronization confidence did not meet the "
-            "configured minimum margin. The detected offset above may be "
-            "unreliable. Downstream phases should consider falling back to "
-            "offset=0 or flagging this run for manual review rather than "
-            "trusting this offset silently."
-        )
+    if events:
+        print("\n  ID  | frames           | time (s)         | peak  | severity")
+        print("  ----+------------------+------------------+-------+---------")
+        shown = events[:20]
+        for e in shown:
+            start_t = e["start_time_s"]
+            end_t = e["end_time_s"]
+            time_str = (
+                f"{start_t:6.2f}–{end_t:6.2f}"
+                if start_t is not None and end_t is not None
+                else "      n/a       "
+            )
+            print(
+                f"  {e['event_id']:>3} | "
+                f"{e['start_frame']:>6}–{e['end_frame']:<6} ({e['duration_frames']:>3}) | "
+                f"{time_str} | {e['peak_score']:5.1f} | {e['severity']}"
+            )
+        if len(events) > len(shown):
+            print(f"  ... and {len(events) - len(shown)} more (see events.csv)")
+    else:
+        print("\n  No pixelation events detected.")
 
-    print("\n" + "=" * 70 + "\n")
+    print(f"\nArtifacts written to: {output_dir}/")
+    print("  - metrics.csv              (per-frame metrics)")
+    print("  - events.csv               (detected events)")
+    print("  - report.json              (full report)")
+    print("  - metric_timeseries.png    (PSNR / SSIM / ΔBDS over time)")
+    print("  - confidence_timeline.png  (FinalScore timeline with events)")
+    print("  - sanity_check.png         (reference-vs-reference control)")
+    print("  - event_overlays/          (per-event peak-frame overlays)")
+    print("=" * 70 + "\n")
 
 
 def main() -> int:
-    configure_logging()
     args = parse_args()
+    configure_logging(args.log_level)
 
-    logger.info("=== Pixelation Detector — Phase 0/1 run starting ===")
-    logger.info("Reference file: %s", args.reference)
-    logger.info("Test file: %s", args.test)
-    logger.info("Report output path: %s", args.output)
+    logger.info("=== Pixelation Detector run starting ===")
+    logger.info("Reference: %s", args.reference)
+    logger.info("Test:      %s", args.test)
+    logger.info("Output:    %s", args.output)
+
+    pipeline = PixelationDetectionPipeline(DEFAULT_CONFIG)
 
     try:
-        reference_source = FileFrameSource(args.reference)
+        report = pipeline.run(args.reference, args.test, args.output)
     except (FileNotFoundError, IOError) as exc:
-        logger.error("Failed to open REFERENCE video '%s': %s", args.reference, exc)
-        print(f"\nERROR: could not open reference video: {args.reference}\n{exc}")
+        logger.error("Could not open an input video: %s", exc)
+        print(f"\nERROR: could not open an input video.\n{exc}\n")
+        return 1
+    except ValueError as exc:
+        logger.error("Analysis failed: %s", exc)
+        print(f"\nERROR: analysis failed.\n{exc}\n")
         return 1
 
-    try:
-        test_source = FileFrameSource(args.test)
-    except (FileNotFoundError, IOError) as exc:
-        logger.error("Failed to open TEST video '%s': %s", args.test, exc)
-        print(f"\nERROR: could not open test video: {args.test}\n{exc}")
-        reference_source.close()
-        return 1
-
-    try:
-        reference_metadata = reference_source.get_metadata()
-        test_metadata = test_source.get_metadata()
-
-        synchronizer = FrameSynchronizer(DEFAULT_CONFIG.sync)
-
-        try:
-            sync_result = synchronizer.compute_offset(reference_source, test_source)
-        except ValueError as exc:
-            logger.error("Synchronization failed: %s", exc)
-            print(f"\nERROR: synchronization failed: {exc}")
-            return 1
-
-        print_console_summary(reference_metadata, test_metadata, sync_result)
-
-        report = build_report(reference_metadata, test_metadata, sync_result)
-
-        output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_path, "w") as f:
-            json.dump(report, f, indent=2)
-
-        logger.info("Diagnostics report written to %s", output_path)
-        print(f"Full diagnostics report saved to: {output_path}\n")
-
-        return 0
-
-    finally:
-        reference_source.close()
-        test_source.close()
-        logger.info("=== Pixelation Detector — Phase 0/1 run complete ===")
+    print_console_summary(report, args.output)
+    logger.info("=== Pixelation Detector run complete ===")
+    return 0
 
 
 if __name__ == "__main__":

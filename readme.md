@@ -160,4 +160,4 @@ Audre Caraig
 
 Electrical Engineering Student
 
-Internship Project – Broadcast Operations / Satellite Communications
+Internship Project – Broadcast Operations 

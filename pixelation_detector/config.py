@@ -428,10 +428,10 @@ class ScoringConfig:
     predictable, interpretable range before scaling.
     """
 
-    WEIGHT_BLOCKINESS: float = 0.30        # was 0.45
-    WEIGHT_AREA: float = 0.25              # was 0.15
-    WEIGHT_SSIM_DIVERGENCE: float = 0.35   # was 0.20
-    WEIGHT_PERSISTENCE: float = 0.10       # was 0.20
+    WEIGHT_BLOCKINESS: float = 0.20        # was 0.45, then 0.30
+    WEIGHT_AREA: float = 0.35              # was 0.15, then 0.25
+    WEIGHT_SSIM_DIVERGENCE: float = 0.35   # was 0.20, then 0.35
+    WEIGHT_PERSISTENCE: float = 0.10       # was 0.20, then 0.10
 
     # Window (frames) over which the persistence factor P(t) is computed: an
     # artifact sustained across multiple frames is more credible (and more

@@ -38,7 +38,7 @@ from pixelation_detector.visualization.metric_timeseries import plot_metric_time
 from pixelation_detector.visualization.confidence_timeline import (
     plot_confidence_timeline,
 )
-from pixelation_detector.visualization.sanity_check import plot_sanity_check
+# from pixelation_detector.visualization.sanity_check import plot_sanity_check
 from pixelation_detector.visualization.event_overlay import render_event_overlays
 
 logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ class VisualizationManager:
 
         self._plot_metric_timeseries(rows, output_dir)
         self._plot_confidence_timeline(rows, events, output_dir)
-        self._plot_sanity_check(reference_path, output_dir)
+        # self._plot_sanity_check(reference_path, output_dir)
         self._plot_event_overlays(events, reference_path, test_path, output_dir)
 
         logger.info("VisualizationManager: all plots complete.")
@@ -128,47 +128,47 @@ class VisualizationManager:
                 "confidence_timeline plot failed; continuing.", exc_info=True
             )
 
-    def _plot_sanity_check(
-        self,
-        reference_path: str,
-        output_dir: str,
-    ) -> None:
-        """
-        Run a reference-vs-reference pass using the same analysis logic as the
-        main pipeline, then plot the resulting FinalScores as the sanity-check
-        figure.
+    # def _plot_sanity_check(
+    #     self,
+    #     reference_path: str,
+    #     output_dir: str,
+    # ) -> None:
+    #     """
+    #     Run a reference-vs-reference pass using the same analysis logic as the
+    #     main pipeline, then plot the resulting FinalScores as the sanity-check
+    #     figure.
 
-        This method imports PixelationDetectionPipeline locally to avoid a
-        circular import (manager is imported by pipeline at module level would
-        be circular; the local import happens only at call time inside run(),
-        where pipeline is already fully loaded).
-        """
-        path = os.path.join(output_dir, "sanity_check.png")
-        try:
-            # Local import avoids circular dependency at module-load time.
-            from pixelation_detector.pipeline import PixelationDetectionPipeline
+    #     This method imports PixelationDetectionPipeline locally to avoid a
+    #     circular import (manager is imported by pipeline at module level would
+    #     be circular; the local import happens only at call time inside run(),
+    #     where pipeline is already fully loaded).
+    #     """
+    #     path = os.path.join(output_dir, "sanity_check.png")
+    #     try:
+    #         # Local import avoids circular dependency at module-load time.
+    #         from pixelation_detector.pipeline import PixelationDetectionPipeline
 
-            ref_source = FileFrameSource(reference_path)
-            try:
-                ref_meta = ref_source.get_metadata()
+    #         ref_source = FileFrameSource(reference_path)
+    #         try:
+    #             ref_meta = ref_source.get_metadata()
 
-                def self_pairs():
-                    for bgr in ref_source.frames():
-                        gray = _to_grayscale(bgr)
-                        yield gray, gray
+    #             def self_pairs():
+    #                 for bgr in ref_source.frames():
+    #                     gray = _to_grayscale(bgr)
+    #                     yield gray, gray
 
-                sanity_pipeline = PixelationDetectionPipeline(self.config)
-                self_rows, _ = sanity_pipeline.analyze_stream(
-                    self_pairs(), fps=ref_meta.fps
-                )
-            finally:
-                ref_source.close()
+    #             sanity_pipeline = PixelationDetectionPipeline(self.config)
+    #             self_rows, _ = sanity_pipeline.analyze_stream(
+    #                 self_pairs(), fps=ref_meta.fps
+    #             )
+    #         finally:
+    #             ref_source.close()
 
-            plot_sanity_check(self_rows, path, self.config)
-        except Exception:
-            logger.warning(
-                "sanity_check plot failed; continuing.", exc_info=True
-            )
+    #         plot_sanity_check(self_rows, path, self.config)
+    #     except Exception:
+    #         logger.warning(
+    #             "sanity_check plot failed; continuing.", exc_info=True
+    #         )
 
     def _plot_event_overlays(
         self,

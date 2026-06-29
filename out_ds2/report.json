@@ -2,8 +2,8 @@
   "summary": {
     "total_frames": 494,
     "total_events": 5,
-    "flagged_frames": 45,
-    "flagged_fraction": 0.09109311740890688,
+    "flagged_frames": 44,
+    "flagged_fraction": 0.08906882591093117,
     "events_by_severity": {
       "low": 0,
       "medium": 5,
@@ -17,8 +17,8 @@
       "end_frame": 90,
       "duration_frames": 13,
       "peak_frame": 87,
-      "peak_score": 25.84576734095244,
-      "mean_score": 24.9693425619559,
+      "peak_score": 25.62270449014158,
+      "mean_score": 24.829463915355284,
       "severity": "medium",
       "start_time_s": 3.12,
       "end_time_s": 3.6
@@ -29,8 +29,8 @@
       "end_frame": 142,
       "duration_frames": 14,
       "peak_frame": 132,
-      "peak_score": 26.087660162549042,
-      "mean_score": 25.109601806853668,
+      "peak_score": 26.211969688215458,
+      "mean_score": 25.468763523900176,
       "severity": "medium",
       "start_time_s": 5.16,
       "end_time_s": 5.68
@@ -38,23 +38,23 @@
     {
       "event_id": 3,
       "start_frame": 257,
-      "end_frame": 265,
-      "duration_frames": 9,
+      "end_frame": 264,
+      "duration_frames": 8,
       "peak_frame": 258,
-      "peak_score": 24.830486540444543,
-      "mean_score": 21.556508625252373,
+      "peak_score": 24.170188807561512,
+      "mean_score": 21.136235539297395,
       "severity": "medium",
       "start_time_s": 10.28,
-      "end_time_s": 10.6
+      "end_time_s": 10.56
     },
     {
       "event_id": 4,
       "start_frame": 270,
       "end_frame": 276,
       "duration_frames": 7,
-      "peak_frame": 275,
-      "peak_score": 26.64060729075084,
-      "mean_score": 25.284940268413852,
+      "peak_frame": 274,
+      "peak_score": 25.37716628195419,
+      "mean_score": 24.068692420437973,
       "severity": "medium",
       "start_time_s": 10.8,
       "end_time_s": 11.04
@@ -65,8 +65,8 @@
       "end_frame": 456,
       "duration_frames": 2,
       "peak_frame": 455,
-      "peak_score": 23.72873043492007,
-      "mean_score": 23.69928403570234,
+      "peak_score": 23.784391106578056,
+      "mean_score": 23.760671750335575,
       "severity": "medium",
       "start_time_s": 18.2,
       "end_time_s": 18.24
@@ -96,7 +96,7 @@
       "SSIM_DATA_RANGE": 255.0,
       "SSIM_DIVERGENCE_THRESHOLD": 0.85,
       "SSIM_REGION_MIN_AREA_PX": 64,
-      "SSIM_DOWNSCALE_FACTOR": 5.0,
+      "SSIM_DOWNSCALE_FACTOR": 1.0,
       "BLOCKINESS_CANDIDATE_SIZES": [
         8,
         16

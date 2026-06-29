@@ -174,7 +174,16 @@ class MetricsConfig:
     # to be reported, suppressing isolated single-pixel speckle that is almost
     # always noise rather than a real artifact patch.
     SSIM_REGION_MIN_AREA_PX: int = 64
-
+    
+        # Downscale factor applied to BOTH frames before computing the SSIM map.
+    # 1.0 = full resolution (no change, the default). 2.0 = halve each
+    # dimension before SSIM (~4x fewer pixels, ~4x faster SSIM) at the cost of
+    # coarser spatial localization. SSIM is the dominant per-frame cost at
+    # 1080p, so this is the primary speed/accuracy lever for real-time use.
+    # ONLY affects SSIM (mean_ssim and divergent_fraction); PSNR and blockiness
+    # still run at full resolution. Re-validate events.csv after changing it.
+    SSIM_DOWNSCALE_FACTOR: float = 5.0
+    
     # -- Blockiness (BDS) ---------------------------------------------------
 
     # Candidate macroblock sizes to evaluate. The encoder's true transform/
@@ -223,6 +232,11 @@ class MetricsConfig:
             raise ValueError("SSIM_GAUSSIAN_SIGMA must be positive.")
         if self.SSIM_DATA_RANGE <= 0:
             raise ValueError("SSIM_DATA_RANGE must be positive.")
+        if self.SSIM_DOWNSCALE_FACTOR < 1.0:
+            raise ValueError(
+                f"SSIM_DOWNSCALE_FACTOR must be >= 1.0 (1.0 = full "
+                f"resolution), got {self.SSIM_DOWNSCALE_FACTOR}."
+            )
         if not (-1.0 <= self.SSIM_DIVERGENCE_THRESHOLD <= 1.0):
             raise ValueError(
                 f"SSIM_DIVERGENCE_THRESHOLD must be within SSIM's [-1, 1] "

@@ -214,16 +214,25 @@ def compute_ssim_map(
     filtering in float32 (a fast, numerically-equivalent replacement for
     scikit-image's structural_similarity).
 
+    If config.SSIM_DOWNSCALE_FACTOR > 1.0, BOTH frames are downscaled by that
+    factor (cv2.INTER_AREA) before the SSIM computation. This trades spatial
+    localization for speed and is the primary real-time lever, since SSIM
+    dominates the per-frame cost at full HD. The returned map is at the
+    (downscaled) analysis resolution; downstream ROI masking and
+    divergent-fraction are resolution-independent, so callers need no change.
+    A downscale that would shrink the smaller side below the SSIM window is
+    skipped (with a warning) rather than failing.
+
     Args:
         reference_frame_gray: 2D numpy array (H, W), single-channel.
         test_frame_gray: 2D numpy array (H, W), identical shape.
         config: MetricsConfig supplying SSIM_WINDOW_SIZE,
-            SSIM_USE_GAUSSIAN_WEIGHTS, SSIM_GAUSSIAN_SIGMA, SSIM_DATA_RANGE.
-            Uses defaults if not provided.
+            SSIM_USE_GAUSSIAN_WEIGHTS, SSIM_GAUSSIAN_SIGMA, SSIM_DATA_RANGE,
+            SSIM_DOWNSCALE_FACTOR. Uses defaults if not provided.
 
     Returns:
-        (mean_ssim, ssim_map): the scalar global mean SSIM and the (H, W) map
-        (float32).
+        (mean_ssim, ssim_map): the scalar global mean SSIM and the (h, w) map
+        (float32) at the analysis resolution.
 
     Raises:
         ValueError: on non-2D input, shape mismatch, empty input, or a window
@@ -234,12 +243,38 @@ def compute_ssim_map(
 
     _validate_pair(reference_frame_gray, test_frame_gray, win_size)
 
+    # Optional downscale (applied to both frames identically). INTER_AREA is
+    # the correct interpolation for shrinking. Skipped if it would make the
+    # smaller side too small for the SSIM window.
+    ref_src = reference_frame_gray
+    test_src = test_frame_gray
+    factor = config.SSIM_DOWNSCALE_FACTOR
+    if factor > 1.0:
+        h, w = reference_frame_gray.shape
+        new_h = int(round(h / factor))
+        new_w = int(round(w / factor))
+        if min(new_h, new_w) >= win_size:
+            ref_src = cv2.resize(
+                reference_frame_gray, (new_w, new_h),
+                interpolation=cv2.INTER_AREA,
+            )
+            test_src = cv2.resize(
+                test_frame_gray, (new_w, new_h),
+                interpolation=cv2.INTER_AREA,
+            )
+        else:
+            logger.warning(
+                "SSIM_DOWNSCALE_FACTOR=%.2f would shrink %dx%d below the SSIM "
+                "window (%d); running SSIM at full resolution for this frame.",
+                factor, w, h, win_size,
+            )
+
     data_range = float(config.SSIM_DATA_RANGE)
     c1 = (_K1 * data_range) ** 2
     c2 = (_K2 * data_range) ** 2
 
-    ref = reference_frame_gray.astype(np.float32)
-    test = test_frame_gray.astype(np.float32)
+    ref = ref_src.astype(np.float32)
+    test = test_src.astype(np.float32)
 
     # Local windowed mean operator. Gaussian (default) matches scikit-image's
     # gaussian_weights=True; the uniform branch matches gaussian_weights=False.
@@ -292,9 +327,11 @@ def compute_ssim_map(
         mean_ssim = float(ssim_map.mean())
 
     logger.debug(
-        "SSIM map computed for shape %s: mean_ssim=%.4f, map range "
-        "[%.4f, %.4f]",
+        "SSIM map computed for analysis shape %s (src %s, factor %.2f): "
+        "mean_ssim=%.4f, map range [%.4f, %.4f]",
+        ssim_map.shape,
         reference_frame_gray.shape,
+        factor,
         mean_ssim,
         float(ssim_map.min()),
         float(ssim_map.max()),

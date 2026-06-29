@@ -5,15 +5,24 @@ run_gui.py
 
 Entry point for the live broadcast-monitoring demonstration UI.
 
-Launches the PySide6 application with two background threads:
-  - DetectionWorker: runs the existing detector and publishes metrics/events.
-  - PlaybackWorker: decode-only, plays both feeds at native fps for a faithful
-    real-time "broadcast" view independent of detector throughput.
-The MainWindow subscribes to both. The detector layer is untouched.
+Choose which video panels to display with --panels to control resource use:
+    live-ref, live-test   native-fps real-time playback
+    proc-ref, proc-test   the detector's analyzed view
+    all                   all four
 
-Usage:
+Only requested panels are built, and the playback thread only decodes the feeds
+it needs, so the UI scales from one panel (light) to four (heavy). The detector
+always runs (it produces metrics/alarms) and decodes both feeds for analysis.
+
+Examples:
+    # Detector view of both feeds (default, lightest with detection):
     python run_gui.py --reference data/normal-converted.mp4 --test data/error-converted.mp4
-    python run_gui.py --reference data/ref.ts --test data/err.ts --frame-skip 2
+
+    # Real-time vs detector view of ONLY the reference feed:
+    python run_gui.py --reference ... --test ... --panels live-ref,proc-ref
+
+    # Everything:
+    python run_gui.py --reference ... --test ... --panels all --frame-skip 2
 """
 
 from __future__ import annotations
@@ -21,6 +30,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from typing import Set
 
 from PySide6.QtWidgets import QApplication
 
@@ -36,6 +46,8 @@ from gui.main_window import MainWindow
 
 logger = logging.getLogger("pixelation_detector.gui")
 
+_VALID_PANELS = {"live-ref", "live-test", "proc-ref", "proc-test"}
+
 
 def configure_logging(level_name: str) -> None:
     level = getattr(logging, level_name.upper(), logging.INFO)
@@ -47,12 +59,27 @@ def configure_logging(level_name: str) -> None:
     )
 
 
+def parse_panels(spec: str) -> Set[str]:
+    spec = spec.strip().lower()
+    if spec == "all":
+        return set(_VALID_PANELS)
+    tokens = {t.strip() for t in spec.split(",") if t.strip()}
+    invalid = tokens - _VALID_PANELS
+    if invalid:
+        raise argparse.ArgumentTypeError(
+            f"Unknown panel(s): {', '.join(sorted(invalid))}. "
+            f"Valid: {', '.join(sorted(_VALID_PANELS))}, or 'all'."
+        )
+    if not tokens:
+        raise argparse.ArgumentTypeError("--panels must list at least one panel.")
+    return tokens
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Live broadcast pixelation-monitoring demonstration UI. Shows both "
-            "feeds at native fps (real-time) and as the detector analyzes them, "
-            "raising alarms live."
+            "Live broadcast pixelation-monitoring demonstration UI. Choose which "
+            "video panels to show with --panels to control resource use."
         )
     )
     parser.add_argument(
@@ -68,12 +95,21 @@ def parse_args() -> argparse.Namespace:
         help="Path to the potentially-degraded test video / stream (backup feed).",
     )
     parser.add_argument(
+        "--panels",
+        type=parse_panels,
+        default="proc-ref,proc-test",
+        help=(
+            "Comma-separated panels to display: live-ref, live-test, proc-ref, "
+            "proc-test, or 'all'. Default: proc-ref,proc-test."
+        ),
+    )
+    parser.add_argument(
         "--frame-skip",
         type=int,
         default=1,
         help=(
             "Analyze every Nth frame (default 1). Affects only the DETECTOR "
-            "panels/metrics; the real-time panels always play every frame."
+            "panels/metrics; real-time panels always play every frame."
         ),
     )
     parser.add_argument(
@@ -95,9 +131,15 @@ def main() -> int:
         logging.getLogger("pixelation_detector.alarms").setLevel(logging.WARNING)
         logging.getLogger("pixelation_detector.pipeline").setLevel(logging.WARNING)
 
+    panels: Set[str] = args.panels
+    need_live_ref = "live-ref" in panels
+    need_live_test = "live-test" in panels
+    need_playback = need_live_ref or need_live_test
+
     logger.info("Starting broadcast-monitoring UI.")
     logger.info("Reference: %s", args.reference)
     logger.info("Test:      %s", args.test)
+    logger.info("Panels:    %s", ", ".join(sorted(panels)))
     logger.info("Frame skip: %d", args.frame_skip)
 
     app = QApplication(sys.argv)
@@ -109,24 +151,31 @@ def main() -> int:
         frame_skip=args.frame_skip,
         config=DEFAULT_CONFIG,
     )
-    playback_worker = PlaybackWorker(
-        reference_path=args.reference,
-        test_path=args.test,
-    )
 
-    window = MainWindow(detection_worker, playback_worker)
+    playback_worker = None
+    if need_playback:
+        playback_worker = PlaybackWorker(
+            reference_path=args.reference,
+            test_path=args.test,
+            decode_reference=need_live_ref,
+            decode_test=need_live_test,
+        )
+
+    window = MainWindow(detection_worker, playback_worker, panels)
     window.show()
 
-    # Start after the window is shown so early signals have a live UI.
     detection_worker.start()
-    playback_worker.start()
+    if playback_worker is not None:
+        playback_worker.start()
 
     exit_code = app.exec()
 
     detection_worker.stop()
-    playback_worker.stop()
+    if playback_worker is not None:
+        playback_worker.stop()
     detection_worker.wait(3000)
-    playback_worker.wait(3000)
+    if playback_worker is not None:
+        playback_worker.wait(3000)
 
     logger.info("UI closed.")
     return exit_code

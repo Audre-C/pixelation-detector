@@ -4,25 +4,20 @@ gui/main_window.py
 
 MainWindow — the broadcast-operations demonstration UI.
 
-Pure presentation layer. It SUBSCRIBES to a DetectionWorker's Qt signals (and a
-PlaybackWorker's) and renders them; it contains no detection logic and never
-calls the detector directly. All heavy work happens on the worker threads, so
-the UI stays responsive.
+Pure presentation layer. Subscribes to a DetectionWorker (metrics/alarms/events,
+and optionally its analyzed video) and optionally a PlaybackWorker (real-time
+native-fps video). Only the video panels requested at launch are built and
+updated, so the UI scales down to a single panel on a modest laptop.
 
-Video grid (2x2):
-  - Top row    : REFERENCE / TEST at native fps (real-time broadcast view),
-                 driven by the decode-only PlaybackWorker.
-  - Bottom row : REFERENCE / TEST as the detector sees them (paced to analysis
-                 throughput), driven by the DetectionWorker.
-
-Also: top status bar, live metrics panel, a small centered alarm pill (a free
-child widget, so it never reflows the layout), and a newest-first event log.
+Panel tokens:
+    live-ref  / live-test  -> native-fps playback (PlaybackWorker)
+    proc-ref  / proc-test  -> detector's analyzed view (DetectionWorker)
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Dict, Optional, Set
 
 import numpy as np
 from PySide6.QtCore import Qt
@@ -63,6 +58,15 @@ _STATUS_COLORS = {
     "ONLINE": "#2e7d32",
     "MONITORING": "#1565c0",
     "ALARM ACTIVE": "#c62828",
+}
+
+# Display order + titles for the four possible panels.
+_PANEL_ORDER = ["live-ref", "live-test", "proc-ref", "proc-test"]
+_PANEL_TITLES = {
+    "live-ref": "REFERENCE — LIVE (real-time fps)",
+    "live-test": "TEST — LIVE (real-time fps)",
+    "proc-ref": "REFERENCE — DETECTOR (analyzed)",
+    "proc-test": "TEST — DETECTOR (analyzed)",
 }
 
 
@@ -177,15 +181,18 @@ class MainWindow(QMainWindow):
     def __init__(
         self,
         detection_worker: DetectionWorker,
-        playback_worker: PlaybackWorker,
+        playback_worker: Optional[PlaybackWorker],
+        panels: Set[str],
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._worker = detection_worker
         self._playback = playback_worker
+        self._panel_tokens = [t for t in _PANEL_ORDER if t in panels]
+        self._panels: Dict[str, VideoPanel] = {}
 
         self.setWindowTitle("Broadcast Pixelation Monitor")
-        self.resize(1480, 960)
+        self.resize(1280, 860)
         self.setStyleSheet("background: #0d1117;")
 
         central = QWidget()
@@ -198,8 +205,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_video_area(), stretch=4)
         root.addWidget(self._build_lower_area(), stretch=2)
 
-        # Small floating alarm pill — free child of central, not in any layout,
-        # so toggling it never reflows or resizes the window.
+        # Floating alarm pill (free child; never reflows the layout).
         self._notif = QLabel(central)
         self._notif.setVisible(False)
         self._notif.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -211,9 +217,10 @@ class MainWindow(QMainWindow):
         self._worker.stats_updated.connect(self._on_stats)
         self._worker.worker_error.connect(self._on_error)
 
-        # Wire playback worker.
-        self._playback.frames_ready.connect(self._on_playback)
-        self._playback.worker_error.connect(self._on_error)
+        # Wire playback worker (if any live panel was requested).
+        if self._playback is not None:
+            self._playback.frames_ready.connect(self._on_playback)
+            self._playback.worker_error.connect(self._on_error)
 
     # -- construction helpers ---------------------------------------------
 
@@ -245,21 +252,25 @@ class MainWindow(QMainWindow):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(10)
 
-        # Top row: real-time broadcast view (PlaybackWorker).
-        self._panel_ref_live = VideoPanel("REFERENCE — LIVE (real-time fps)")
-        self._panel_test_live = VideoPanel("TEST — LIVE (real-time fps)")
-        # Bottom row: detector view (DetectionWorker).
-        self._panel_ref = VideoPanel("REFERENCE — DETECTOR (analyzed)")
-        self._panel_test = VideoPanel("TEST — DETECTOR (analyzed)")
+        n = len(self._panel_tokens)
+        cols = 1 if n <= 1 else 2
+        for i, token in enumerate(self._panel_tokens):
+            panel = VideoPanel(_PANEL_TITLES[token])
+            self._panels[token] = panel
+            grid.addWidget(panel, i // cols, i % cols)
 
-        grid.addWidget(self._panel_ref_live, 0, 0)
-        grid.addWidget(self._panel_test_live, 0, 1)
-        grid.addWidget(self._panel_ref, 1, 0)
-        grid.addWidget(self._panel_test, 1, 1)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        grid.setRowStretch(0, 1)
-        grid.setRowStretch(1, 1)
+        # Even stretch so panels share space equally.
+        rows = (n + cols - 1) // cols if n else 1
+        for c in range(max(cols, 1)):
+            grid.setColumnStretch(c, 1)
+        for r in range(max(rows, 1)):
+            grid.setRowStretch(r, 1)
+
+        if n == 0:
+            placeholder = QLabel("No video panels selected (metrics only).")
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setStyleSheet("color: #555; font-size: 14px;")
+            grid.addWidget(placeholder, 0, 0)
 
         self._video_area = area
         return area
@@ -343,7 +354,6 @@ class MainWindow(QMainWindow):
         )
 
     def _reposition_notif(self) -> None:
-        """Anchor the pill to the top-center of the video area."""
         if not self._notif.isVisible():
             return
         area_geo = self._video_area.geometry()
@@ -359,12 +369,18 @@ class MainWindow(QMainWindow):
     # -- slots -------------------------------------------------------------
 
     def _on_playback(self, payload: PlaybackFrame) -> None:
-        self._panel_ref_live.set_frame(payload.reference_bgr, None)
-        self._panel_test_live.set_frame(payload.test_bgr, None)
+        if "live-ref" in self._panels and payload.reference_bgr is not None:
+            self._panels["live-ref"].set_frame(payload.reference_bgr, None)
+        if "live-test" in self._panels and payload.test_bgr is not None:
+            self._panels["live-test"].set_frame(payload.test_bgr, None)
 
     def _on_frame(self, payload: FramePayload) -> None:
-        self._panel_ref.set_frame(payload.reference_bgr, None)
-        self._panel_test.set_frame(payload.test_bgr, payload.region_bbox)
+        if "proc-ref" in self._panels:
+            self._panels["proc-ref"].set_frame(payload.reference_bgr, None)
+        if "proc-test" in self._panels:
+            self._panels["proc-test"].set_frame(
+                payload.test_bgr, payload.region_bbox
+            )
 
         self._tile_frame.set_value(str(payload.frame_index))
         self._tile_psnr.set_value(_fmt(payload.psnr_db, ".2f"))
@@ -424,15 +440,17 @@ class MainWindow(QMainWindow):
 
     def _on_error(self, message: str) -> None:
         self._tile_status.set_value("ERROR", "#c62828")
-        self._panel_ref._video.setText(f"ERROR:\n{message}")
-        self._panel_test._video.setText("stream unavailable")
+        for panel in self._panels.values():
+            panel._video.setText(f"ERROR:\n{message}")
 
     # -- lifecycle ---------------------------------------------------------
 
     def closeEvent(self, event) -> None:  # noqa: N802
         logger.info("MainWindow closing; stopping workers.")
         self._worker.stop()
-        self._playback.stop()
+        if self._playback is not None:
+            self._playback.stop()
         self._worker.wait(3000)
-        self._playback.wait(3000)
+        if self._playback is not None:
+            self._playback.wait(3000)
         super().closeEvent(event)

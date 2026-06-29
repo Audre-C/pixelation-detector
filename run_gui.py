@@ -5,22 +5,15 @@ run_gui.py
 
 Entry point for the live broadcast-monitoring demonstration UI.
 
-Launches the PySide6 application: it creates a DetectionWorker (which runs the
-existing detector in a background thread) and a MainWindow (which subscribes to
-the worker's signals and renders them). The detector layer is untouched — this
-is a pure UI front-end.
+Launches the PySide6 application with two background threads:
+  - DetectionWorker: runs the existing detector and publishes metrics/events.
+  - PlaybackWorker: decode-only, plays both feeds at native fps for a faithful
+    real-time "broadcast" view independent of detector throughput.
+The MainWindow subscribes to both. The detector layer is untouched.
 
 Usage:
     python run_gui.py --reference data/normal-converted.mp4 --test data/error-converted.mp4
-    python run_gui.py --reference data/normal-converted.mp4 --test data/error-converted.mp4 --frame-skip 2
-    python run_gui.py --reference data/ref.ts --test data/err.ts
-
-Notes:
-  - Both inputs loop forever and stay frame-aligned (frame N vs frame N).
-  - --frame-skip N analyzes every Nth frame; every frame is still displayed.
-    Use it when full-rate analysis can't keep up, so video plays at source fps.
-  - Any FFmpeg-readable container works (mp4, ts, ...). A future live
-    UDP/RTP/RTSP source only requires a different FrameSource — no UI change.
+    python run_gui.py --reference data/ref.ts --test data/err.ts --frame-skip 2
 """
 
 from __future__ import annotations
@@ -38,6 +31,7 @@ from pixelation_detector.config import (
     LOG_LEVEL,
 )
 from gui.worker import DetectionWorker
+from gui.playback_worker import PlaybackWorker
 from gui.main_window import MainWindow
 
 logger = logging.getLogger("pixelation_detector.gui")
@@ -56,9 +50,9 @@ def configure_logging(level_name: str) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Live broadcast pixelation-monitoring demonstration UI. Plays the "
-            "reference and test feeds side by side while the detector runs in a "
-            "background thread and raises alarms live."
+            "Live broadcast pixelation-monitoring demonstration UI. Shows both "
+            "feeds at native fps (real-time) and as the detector analyzes them, "
+            "raising alarms live."
         )
     )
     parser.add_argument(
@@ -78,9 +72,8 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help=(
-            "Analyze every Nth frame (default 1). N>1 keeps video smooth at "
-            "source fps when full-rate analysis can't keep up; events shorter "
-            "than N analyzed frames may be missed."
+            "Analyze every Nth frame (default 1). Affects only the DETECTOR "
+            "panels/metrics; the real-time panels always play every frame."
         ),
     )
     parser.add_argument(
@@ -97,8 +90,6 @@ def main() -> int:
     args = parse_args()
     configure_logging(args.log_level)
 
-    # Keep the detector's own INFO chatter out of the console unless DEBUG is
-    # explicitly requested, so the GUI session log stays readable.
     if args.log_level == LOG_LEVEL:
         logging.getLogger("pixelation_detector.io").setLevel(logging.WARNING)
         logging.getLogger("pixelation_detector.alarms").setLevel(logging.WARNING)
@@ -112,26 +103,30 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Broadcast Pixelation Monitor")
 
-    worker = DetectionWorker(
+    detection_worker = DetectionWorker(
         reference_path=args.reference,
         test_path=args.test,
         frame_skip=args.frame_skip,
         config=DEFAULT_CONFIG,
     )
+    playback_worker = PlaybackWorker(
+        reference_path=args.reference,
+        test_path=args.test,
+    )
 
-    window = MainWindow(worker)
+    window = MainWindow(detection_worker, playback_worker)
     window.show()
 
-    # Start detection only after the window is shown, so early signals have a
-    # live UI to land on.
-    worker.start()
+    # Start after the window is shown so early signals have a live UI.
+    detection_worker.start()
+    playback_worker.start()
 
     exit_code = app.exec()
 
-    # Ensure the worker is fully stopped before the process exits (closeEvent
-    # already requests this, but guard the direct-quit path too).
-    worker.stop()
-    worker.wait(3000)
+    detection_worker.stop()
+    playback_worker.stop()
+    detection_worker.wait(3000)
+    playback_worker.wait(3000)
 
     logger.info("UI closed.")
     return exit_code

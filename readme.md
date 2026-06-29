@@ -146,6 +146,13 @@ The project is currently under active development as part of an internship proje
 
 Current testing has primarily been performed using synthetically generated pixelation artifacts. Future work includes validation and tuning using real-world transmission impairments captured from operational broadcast streams.
 
+# Continuous monitoring, stats every 30s, Ctrl+C to stop:
+python main.py --reference data/normal-converted.mp4 --test data/error-converted.mp4 --continuous
+# Custom interval + one-shot report at shutdown:
+python main.py --reference data/normal-converted.mp4 --test data/error-converted.mp4 --continuous --stats-interval 15 --continuous-report monitor_out
+# Offline (unchanged):
+python main.py --reference data/normal-converted.mp4 --test data/error-converted.mp4
+
 ## Future Improvements
 
 * Real-time transport stream integration

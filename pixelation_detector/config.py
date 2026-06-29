@@ -182,7 +182,7 @@ class MetricsConfig:
     # 1080p, so this is the primary speed/accuracy lever for real-time use.
     # ONLY affects SSIM (mean_ssim and divergent_fraction); PSNR and blockiness
     # still run at full resolution. Re-validate events.csv after changing it.
-    SSIM_DOWNSCALE_FACTOR: float = 5.0
+    SSIM_DOWNSCALE_FACTOR: float = 10.0
     
     # -- Blockiness (BDS) ---------------------------------------------------
 

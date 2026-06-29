@@ -4,18 +4,19 @@ gui/main_window.py
 
 MainWindow — the broadcast-operations demonstration UI.
 
-Pure presentation layer. It SUBSCRIBES to a DetectionWorker's Qt signals and
-renders them; it contains no detection logic and never calls the detector
-directly. All heavy work happens in the worker thread, so the UI stays
-responsive.
+Pure presentation layer. It SUBSCRIBES to a DetectionWorker's Qt signals (and a
+PlaybackWorker's) and renders them; it contains no detection logic and never
+calls the detector directly. All heavy work happens on the worker threads, so
+the UI stays responsive.
 
-Layout:
-  - Top bar    : title, system status, processing FPS, elapsed runtime.
-  - Main area  : two video panels (Reference / Test), aspect-ratio preserved.
-  - Status panel : live frame #, PSNR, SSIM, ΔBDS, FinalScore, severity.
-  - Alarm banner : large flashing red "PIXELATION DETECTED" while an alarm is
-                   active; auto-hides when the event finishes.
-  - Event log  : scrolling table of confirmed events, newest on top.
+Video grid (2x2):
+  - Top row    : REFERENCE / TEST at native fps (real-time broadcast view),
+                 driven by the decode-only PlaybackWorker.
+  - Bottom row : REFERENCE / TEST as the detector sees them (paced to analysis
+                 throughput), driven by the DetectionWorker.
+
+Also: top status bar, live metrics panel, a small centered alarm pill (a free
+child widget, so it never reflows the layout), and a newest-first event log.
 """
 
 from __future__ import annotations
@@ -24,8 +25,8 @@ import logging
 from typing import Optional
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -47,12 +48,11 @@ from gui.worker import (
     FramePayload,
     StatsPayload,
 )
+from gui.playback_worker import PlaybackFrame, PlaybackWorker
 
 logger = logging.getLogger(__name__)
 
 
-# Severity -> display colour (kept local to the UI; the detector owns the
-# vocabulary, the UI owns the palette).
 _SEVERITY_COLORS = {
     "NONE": "#3a3f44",
     "LOW": "#c9a227",
@@ -67,7 +67,6 @@ _STATUS_COLORS = {
 
 
 def _fmt(value: Optional[float], fmt: str) -> str:
-    """Format an optional float, or '—' when it is None/NaN."""
     if value is None:
         return "—"
     if isinstance(value, float) and value != value:  # NaN
@@ -76,30 +75,17 @@ def _fmt(value: Optional[float], fmt: str) -> str:
 
 
 def _bgr_to_qimage(frame_bgr: np.ndarray) -> QImage:
-    """
-    Convert a BGR uint8 numpy frame to a QImage (RGB888). A contiguous copy is
-    made so the QImage owns valid memory regardless of the source array's
-    lifetime.
-    """
     if frame_bgr.ndim == 2:
         rgb = np.ascontiguousarray(frame_bgr)
         h, w = rgb.shape
         return QImage(rgb.data, w, h, w, QImage.Format.Format_Grayscale8).copy()
-    # BGR -> RGB without cv2 dependency here.
     rgb = np.ascontiguousarray(frame_bgr[:, :, ::-1])
     h, w, _ = rgb.shape
-    bytes_per_line = 3 * w
-    return QImage(
-        rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
-    ).copy()
+    return QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
 
 
 class VideoPanel(QWidget):
-    """
-    A titled video display that scales its frame to fit while preserving aspect
-    ratio, with an optional overlay rectangle (placeholder for affected-region
-    highlighting).
-    """
+    """Titled, aspect-ratio-preserving video display with an optional overlay."""
 
     def __init__(self, title: str, parent=None) -> None:
         super().__init__(parent)
@@ -107,13 +93,13 @@ class VideoPanel(QWidget):
         self._title = QLabel(title)
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._title.setStyleSheet(
-            "color: #e6e6e6; font-size: 15px; font-weight: 600; "
-            "padding: 4px; background: #1b1f24;"
+            "color: #e6e6e6; font-size: 14px; font-weight: 600; "
+            "padding: 3px; background: #1b1f24;"
         )
 
         self._video = QLabel("Waiting for stream…")
         self._video.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._video.setMinimumSize(320, 180)
+        self._video.setMinimumSize(240, 135)
         self._video.setStyleSheet("background: #000000; color: #555;")
         self._video.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -129,27 +115,22 @@ class VideoPanel(QWidget):
         self._region_bbox: Optional[tuple] = None
 
     def set_frame(self, frame_bgr: np.ndarray, region_bbox: Optional[tuple]) -> None:
-        qimg = _bgr_to_qimage(frame_bgr)
-        self._source_pixmap = QPixmap.fromImage(qimg)
+        self._source_pixmap = QPixmap.fromImage(_bgr_to_qimage(frame_bgr))
         self._region_bbox = region_bbox
         self._render()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
+    def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._render()
 
     def _render(self) -> None:
         if self._source_pixmap is None:
             return
-
-        target = self._video.size()
         scaled = self._source_pixmap.scaled(
-            target,
+            self._video.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-
-        # Optional affected-region overlay (placeholder: bbox is None today).
         if self._region_bbox is not None and self._source_pixmap.width() > 0:
             scale = scaled.width() / self._source_pixmap.width()
             x, y, w, h = self._region_bbox
@@ -158,11 +139,9 @@ class VideoPanel(QWidget):
             pen.setWidth(3)
             painter.setPen(pen)
             painter.drawRect(
-                int(x * scale), int(y * scale),
-                int(w * scale), int(h * scale),
+                int(x * scale), int(y * scale), int(w * scale), int(h * scale)
             )
             painter.end()
-
         self._video.setPixmap(scaled)
 
 
@@ -172,9 +151,7 @@ class _StatTile(QFrame):
     def __init__(self, caption: str, parent=None) -> None:
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(
-            "background: #1b1f24; border-radius: 6px;"
-        )
+        self.setStyleSheet("background: #1b1f24; border-radius: 6px;")
         self._caption = QLabel(caption)
         self._caption.setStyleSheet("color: #8b949e; font-size: 11px;")
         self._value = QLabel("—")
@@ -189,25 +166,26 @@ class _StatTile(QFrame):
 
     def set_value(self, text: str, color: Optional[str] = None) -> None:
         self._value.setText(text)
-        if color is not None:
-            self._value.setStyleSheet(
-                f"color: {color}; font-size: 18px; font-weight: 700;"
-            )
-        else:
-            self._value.setStyleSheet(
-                "color: #e6e6e6; font-size: 18px; font-weight: 700;"
-            )
+        self._value.setStyleSheet(
+            f"color: {color or '#e6e6e6'}; font-size: 18px; font-weight: 700;"
+        )
 
 
 class MainWindow(QMainWindow):
     """The top-level demonstration window."""
 
-    def __init__(self, worker: DetectionWorker, parent=None) -> None:
+    def __init__(
+        self,
+        detection_worker: DetectionWorker,
+        playback_worker: PlaybackWorker,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
-        self._worker = worker
+        self._worker = detection_worker
+        self._playback = playback_worker
 
         self.setWindowTitle("Broadcast Pixelation Monitor")
-        self.resize(1480, 900)
+        self.resize(1480, 960)
         self.setStyleSheet("background: #0d1117;")
 
         central = QWidget()
@@ -217,21 +195,25 @@ class MainWindow(QMainWindow):
         root.setSpacing(10)
 
         root.addWidget(self._build_top_bar())
-        root.addWidget(self._build_alarm_banner())
-        root.addWidget(self._build_video_area(), stretch=3)
+        root.addWidget(self._build_video_area(), stretch=4)
         root.addWidget(self._build_lower_area(), stretch=2)
 
-        # Flashing banner timer.
-        self._flash_on = False
-        self._flash_timer = QTimer(self)
-        self._flash_timer.setInterval(450)
-        self._flash_timer.timeout.connect(self._toggle_flash)
+        # Small floating alarm pill — free child of central, not in any layout,
+        # so toggling it never reflows or resizes the window.
+        self._notif = QLabel(central)
+        self._notif.setVisible(False)
+        self._notif.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._notif.setStyleSheet(self._notif_style("MEDIUM"))
 
-        # Wire worker signals.
+        # Wire detection worker.
         self._worker.frame_ready.connect(self._on_frame)
         self._worker.event_logged.connect(self._on_event)
         self._worker.stats_updated.connect(self._on_stats)
         self._worker.worker_error.connect(self._on_error)
+
+        # Wire playback worker.
+        self._playback.frames_ready.connect(self._on_playback)
+        self._playback.worker_error.connect(self._on_error)
 
     # -- construction helpers ---------------------------------------------
 
@@ -255,28 +237,31 @@ class MainWindow(QMainWindow):
         self._tile_status.set_value("ONLINE", _STATUS_COLORS["ONLINE"])
         for tile in (self._tile_status, self._tile_fps, self._tile_elapsed):
             layout.addWidget(tile)
-
         return bar
-
-    def _build_alarm_banner(self) -> QWidget:
-        self._banner = QLabel("PIXELATION DETECTED")
-        self._banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._banner.setFont(QFont("Arial", 26, QFont.Weight.Black))
-        self._banner.setStyleSheet(self._banner_style(bright=True))
-        self._banner.setFixedHeight(64)
-        self._banner.setVisible(False)
-        return self._banner
 
     def _build_video_area(self) -> QWidget:
         area = QWidget()
-        layout = QHBoxLayout(area)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        grid = QGridLayout(area)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(10)
 
-        self._panel_ref = VideoPanel("REFERENCE  (MAIN FEED)")
-        self._panel_test = VideoPanel("TEST  (BACKUP FEED)")
-        layout.addWidget(self._panel_ref, stretch=1)
-        layout.addWidget(self._panel_test, stretch=1)
+        # Top row: real-time broadcast view (PlaybackWorker).
+        self._panel_ref_live = VideoPanel("REFERENCE — LIVE (real-time fps)")
+        self._panel_test_live = VideoPanel("TEST — LIVE (real-time fps)")
+        # Bottom row: detector view (DetectionWorker).
+        self._panel_ref = VideoPanel("REFERENCE — DETECTOR (analyzed)")
+        self._panel_test = VideoPanel("TEST — DETECTOR (analyzed)")
+
+        grid.addWidget(self._panel_ref_live, 0, 0)
+        grid.addWidget(self._panel_test_live, 0, 1)
+        grid.addWidget(self._panel_ref, 1, 0)
+        grid.addWidget(self._panel_test, 1, 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch(0, 1)
+        grid.setRowStretch(1, 1)
+
+        self._video_area = area
         return area
 
     def _build_lower_area(self) -> QWidget:
@@ -297,9 +282,7 @@ class MainWindow(QMainWindow):
         grid.setSpacing(8)
 
         header = QLabel("LIVE METRICS")
-        header.setStyleSheet(
-            "color: #8b949e; font-size: 12px; font-weight: 700;"
-        )
+        header.setStyleSheet("color: #8b949e; font-size: 12px; font-weight: 700;")
         grid.addWidget(header, 0, 0, 1, 2)
 
         self._tile_frame = _StatTile("FRAME #")
@@ -327,9 +310,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
 
         header = QLabel("EVENT LOG  (newest first)")
-        header.setStyleSheet(
-            "color: #8b949e; font-size: 12px; font-weight: 700;"
-        )
+        header.setStyleSheet("color: #8b949e; font-size: 12px; font-weight: 700;")
         layout.addWidget(header)
 
         self._table = QTableWidget(0, 5)
@@ -345,68 +326,70 @@ class MainWindow(QMainWindow):
             "QHeaderView::section { background: #1b1f24; color: #8b949e; "
             "padding: 4px; border: none; font-weight: 700; }"
         )
-        header_view = self._table.horizontalHeader()
-        header_view.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         layout.addWidget(self._table)
         return panel
 
-    # -- styling helpers ---------------------------------------------------
+    # -- alarm pill --------------------------------------------------------
 
     @staticmethod
-    def _banner_style(bright: bool) -> str:
-        bg = "#ff1e1e" if bright else "#7a0000"
+    def _notif_style(severity: str) -> str:
+        color = _SEVERITY_COLORS.get(severity, "#e07b00")
         return (
-            f"background: {bg}; color: #ffffff; border-radius: 8px; "
-            f"letter-spacing: 2px;"
+            f"background: {color}; color: #ffffff; font-size: 13px; "
+            f"font-weight: 700; padding: 6px 12px; border-radius: 14px;"
         )
 
-    # -- slots (run on the GUI thread) ------------------------------------
+    def _reposition_notif(self) -> None:
+        """Anchor the pill to the top-center of the video area."""
+        if not self._notif.isVisible():
+            return
+        area_geo = self._video_area.geometry()
+        self._notif.adjustSize()
+        x = area_geo.x() + (area_geo.width() - self._notif.width()) // 2
+        y = area_geo.y() + 16
+        self._notif.move(x, y)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._reposition_notif()
+
+    # -- slots -------------------------------------------------------------
+
+    def _on_playback(self, payload: PlaybackFrame) -> None:
+        self._panel_ref_live.set_frame(payload.reference_bgr, None)
+        self._panel_test_live.set_frame(payload.test_bgr, None)
 
     def _on_frame(self, payload: FramePayload) -> None:
-        # Video.
         self._panel_ref.set_frame(payload.reference_bgr, None)
         self._panel_test.set_frame(payload.test_bgr, payload.region_bbox)
 
-        # Live metrics.
         self._tile_frame.set_value(str(payload.frame_index))
         self._tile_psnr.set_value(_fmt(payload.psnr_db, ".2f"))
         self._tile_ssim.set_value(_fmt(payload.mean_ssim, ".4f"))
         self._tile_bds.set_value(_fmt(payload.delta_bds, ".3f"))
         self._tile_score.set_value(_fmt(payload.final_score, ".1f"))
         sev = payload.severity or "NONE"
-        self._tile_sev.set_value(
-            sev, _SEVERITY_COLORS.get(sev, "#e6e6e6")
-        )
+        self._tile_sev.set_value(sev, _SEVERITY_COLORS.get(sev, "#e6e6e6"))
 
-        # Alarm banner.
-        self._update_banner(payload.active_event)
+        self._update_notif(payload.active_event)
 
-    def _update_banner(self, active: Optional[ActiveEvent]) -> None:
+    def _update_notif(self, active: Optional[ActiveEvent]) -> None:
         if active is None:
-            if self._banner.isVisible():
-                self._banner.setVisible(False)
-                self._flash_timer.stop()
+            if self._notif.isVisible():
+                self._notif.setVisible(False)
             return
-
-        text = (
-            f"⚠  PIXELATION DETECTED   "
-            f"EVENT #{active.event_id}   "
-            f"start frame {active.start_frame}   "
-            f"dur {active.duration_frames}f   "
-            f"score {active.current_score:.1f}   "
-            f"peak {active.peak_score:.1f}   "
-            f"{active.severity}"
+        self._notif.setStyleSheet(self._notif_style(active.severity))
+        self._notif.setText(
+            f"●  Pixelation — event #{active.event_id} · "
+            f"score {active.current_score:.0f} · {active.severity}"
         )
-        self._banner.setText(text)
-        if not self._banner.isVisible():
-            self._banner.setVisible(True)
-            self._flash_on = True
-            self._banner.setStyleSheet(self._banner_style(bright=True))
-            self._flash_timer.start()
-
-    def _toggle_flash(self) -> None:
-        self._flash_on = not self._flash_on
-        self._banner.setStyleSheet(self._banner_style(bright=self._flash_on))
+        if not self._notif.isVisible():
+            self._notif.setVisible(True)
+            self._notif.raise_()
+        self._reposition_notif()
 
     def _on_event(self, record: EventRecord) -> None:
         ts = (
@@ -425,7 +408,7 @@ class MainWindow(QMainWindow):
         for col, value in enumerate(row_values):
             item = QTableWidgetItem(value)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if col == 2:  # severity colour
+            if col == 2:
                 item.setForeground(
                     QColor(_SEVERITY_COLORS.get(record.severity, "#e6e6e6"))
                 )
@@ -446,8 +429,10 @@ class MainWindow(QMainWindow):
 
     # -- lifecycle ---------------------------------------------------------
 
-    def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
-        logger.info("MainWindow closing; stopping worker.")
+    def closeEvent(self, event) -> None:  # noqa: N802
+        logger.info("MainWindow closing; stopping workers.")
         self._worker.stop()
+        self._playback.stop()
         self._worker.wait(3000)
+        self._playback.wait(3000)
         super().closeEvent(event)

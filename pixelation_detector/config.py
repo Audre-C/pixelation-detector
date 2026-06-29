@@ -196,7 +196,7 @@ class MetricsConfig:
     # candidate, so the lower bound is 0. WHY upper bound 5.0: caps a single
     # pathological frame from dominating downstream scoring; 5x excess
     # block-edge energy is already saturated "obviously broken" territory.
-    BLOCKINESS_DELTA_CLIP: Tuple[float, float] = (0.0, 2.5) #was 5.0
+    BLOCKINESS_DELTA_CLIP: Tuple[float, float] = (0.0, 5.0)
 
     # Pixels of margin the internal-gradient sample requires inside a block
     # boundary. The BDS formula samples internal gradient at indices k*B-2 and
@@ -428,10 +428,10 @@ class ScoringConfig:
     predictable, interpretable range before scaling.
     """
 
-    WEIGHT_BLOCKINESS: float = 0.30        # was 0.45
-    WEIGHT_AREA: float = 0.25              # was 0.15
-    WEIGHT_SSIM_DIVERGENCE: float = 0.35   # was 0.20
-    WEIGHT_PERSISTENCE: float = 0.10       # was 0.20
+    WEIGHT_BLOCKINESS: float = 0.45        # was 0.45 (BEST?), then 0.30, then 0.20
+    WEIGHT_AREA: float = 0.15              # was 0.15, then 0.25, then 0.35
+    WEIGHT_SSIM_DIVERGENCE: float = 0.20   # was 0.20, then 0.35
+    WEIGHT_PERSISTENCE: float = 0.20       # was 0.20, then 0.10
 
     # Window (frames) over which the persistence factor P(t) is computed: an
     # artifact sustained across multiple frames is more credible (and more

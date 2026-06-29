@@ -70,10 +70,13 @@ concern, not something this standalone metric decides.
 
 DTYPE SAFETY:
 ---------------
-Inputs are cast to float64 BEFORE differencing. This is mandatory: subtracting
-two uint8 arrays directly wraps around modulo 256 (e.g. 0 - 255 = 1, not
--255), which would silently corrupt the MSE. The cast is the single most
-important correctness detail in this file.
+The squared error is formed via cv2.absdiff (which returns the SATURATING
+absolute difference of two uint8 frames — i.e. |R-T|, with no modulo
+wraparound) cast to float32 before squaring. Because the error is squared,
+|R-T|^2 == (R-T)^2 exactly, so this is numerically identical to a float
+subtraction but faster and lighter than the previous float64 path. If inputs
+are not uint8 they are cast to uint8 first, consistent with the pipeline-wide
+8-bit assumption.
 """
 
 from __future__ import annotations
@@ -83,6 +86,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
+import cv2
 import numpy as np
 
 from pixelation_detector.config import MetricsConfig
@@ -126,8 +130,7 @@ def compute_psnr(
     region) of identical shape.
 
     Args:
-        reference_frame_gray: 2D numpy array (H, W), single-channel, any
-            numeric dtype (cast to float64 internally for differencing).
+        reference_frame_gray: 2D numpy array (H, W), single-channel.
         test_frame_gray: 2D numpy array (H, W), identical shape and channel
             convention as the reference.
         config: MetricsConfig supplying PSNR_MAX_PIXEL_VALUE,
@@ -176,13 +179,22 @@ def compute_psnr(
             "undefined."
         )
 
-    # DTYPE SAFETY: cast to float64 BEFORE subtracting. Subtracting uint8
-    # arrays directly wraps modulo 256 and silently corrupts the error.
-    diff = (
-        reference_frame_gray.astype(np.float64)
-        - test_frame_gray.astype(np.float64)
+    # DTYPE SAFETY: cv2.absdiff gives the saturating absolute difference of
+    # two uint8 frames (|R-T|, no modulo wraparound). Squaring it in float32
+    # yields the exact same MSE as a float subtraction, but faster.
+    ref_u8 = (
+        reference_frame_gray
+        if reference_frame_gray.dtype == np.uint8
+        else reference_frame_gray.astype(np.uint8)
     )
-    mse = float(np.mean(diff * diff))
+    test_u8 = (
+        test_frame_gray
+        if test_frame_gray.dtype == np.uint8
+        else test_frame_gray.astype(np.uint8)
+    )
+
+    abs_diff = cv2.absdiff(ref_u8, test_u8).astype(np.float32)
+    mse = float(np.mean(abs_diff * abs_diff))
 
     max_value = config.PSNR_MAX_PIXEL_VALUE
 

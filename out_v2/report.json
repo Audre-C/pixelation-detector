@@ -1,0 +1,140 @@
+{
+  "summary": {
+    "total_frames": 494,
+    "total_events": 5,
+    "flagged_frames": 44,
+    "flagged_fraction": 0.08906882591093117,
+    "events_by_severity": {
+      "low": 0,
+      "medium": 5,
+      "high": 0
+    }
+  },
+  "events": [
+    {
+      "event_id": 1,
+      "start_frame": 78,
+      "end_frame": 90,
+      "duration_frames": 13,
+      "peak_frame": 87,
+      "peak_score": 25.62270449014158,
+      "mean_score": 24.829463915355284,
+      "severity": "medium",
+      "start_time_s": 3.12,
+      "end_time_s": 3.6
+    },
+    {
+      "event_id": 2,
+      "start_frame": 129,
+      "end_frame": 142,
+      "duration_frames": 14,
+      "peak_frame": 132,
+      "peak_score": 26.211969688215458,
+      "mean_score": 25.468763523900176,
+      "severity": "medium",
+      "start_time_s": 5.16,
+      "end_time_s": 5.68
+    },
+    {
+      "event_id": 3,
+      "start_frame": 257,
+      "end_frame": 264,
+      "duration_frames": 8,
+      "peak_frame": 258,
+      "peak_score": 24.170188807561512,
+      "mean_score": 21.136235539297395,
+      "severity": "medium",
+      "start_time_s": 10.28,
+      "end_time_s": 10.56
+    },
+    {
+      "event_id": 4,
+      "start_frame": 270,
+      "end_frame": 276,
+      "duration_frames": 7,
+      "peak_frame": 274,
+      "peak_score": 25.37716628195419,
+      "mean_score": 24.068692420437973,
+      "severity": "medium",
+      "start_time_s": 10.8,
+      "end_time_s": 11.04
+    },
+    {
+      "event_id": 5,
+      "start_frame": 455,
+      "end_frame": 456,
+      "duration_frames": 2,
+      "peak_frame": 455,
+      "peak_score": 23.784391106578056,
+      "mean_score": 23.760671750335575,
+      "severity": "medium",
+      "start_time_s": 18.2,
+      "end_time_s": 18.24
+    }
+  ],
+  "metadata": {
+    "reference_path": "data/normal-converted.mp4",
+    "test_path": "data/error-converted.mp4",
+    "reference_fps": 25.0,
+    "reference_frame_count": 501,
+    "test_frame_count": 494,
+    "frames_analyzed": 494,
+    "width": 1920,
+    "height": 1080
+  },
+  "config": {
+    "io": {
+      "TRUST_OPENCV_METADATA": true
+    },
+    "metrics": {
+      "PSNR_MAX_PIXEL_VALUE": 255.0,
+      "PSNR_PERFECT_MATCH_DB": 100.0,
+      "PSNR_GATE_DB": 38.0,
+      "SSIM_WINDOW_SIZE": 7,
+      "SSIM_USE_GAUSSIAN_WEIGHTS": true,
+      "SSIM_GAUSSIAN_SIGMA": 1.5,
+      "SSIM_DATA_RANGE": 255.0,
+      "SSIM_DIVERGENCE_THRESHOLD": 0.85,
+      "SSIM_REGION_MIN_AREA_PX": 64,
+      "BLOCKINESS_CANDIDATE_SIZES": [
+        8,
+        16
+      ],
+      "BLOCKINESS_EPSILON": 1.0,
+      "BLOCKINESS_DELTA_CLIP": [
+        0.0,
+        5.0
+      ],
+      "BLOCKINESS_BORDER_MARGIN_PIXELS": 3
+    },
+    "cut": {
+      "HIST_BINS": 64,
+      "INTERSECTION_CUT_THRESHOLD": 0.5
+    },
+    "roi": {
+      "EXCLUSION_ZONES_NORMALIZED": []
+    },
+    "baseline": {
+      "WINDOW_FRAMES": 30,
+      "MIN_SAMPLES_FOR_BASELINE": 10,
+      "Z_SCORE_THRESHOLD": 3.5,
+      "MAD_SCALE_FACTOR": 1.4826,
+      "EPSILON": 1e-06
+    },
+    "scoring": {
+      "WEIGHT_BLOCKINESS": 0.45,
+      "WEIGHT_AREA": 0.15,
+      "WEIGHT_SSIM_DIVERGENCE": 0.2,
+      "WEIGHT_PERSISTENCE": 0.2,
+      "PERSISTENCE_WINDOW_FRAMES": 5,
+      "SCORE_SCALE": 100.0
+    },
+    "alarms": {
+      "EVENT_TRIGGER_SCORE": 20.0,
+      "EVENT_GAP_TOLERANCE_FRAMES": 3,
+      "EVENT_MIN_DURATION_FRAMES": 2,
+      "LOW_MEDIUM_BOUNDARY": 20,
+      "MEDIUM_HIGH_BOUNDARY": 50
+    }
+  }
+}

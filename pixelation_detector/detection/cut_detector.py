@@ -49,6 +49,16 @@ happen to share an intensity distribution will not be flagged. That is an
 acceptable trade for this pipeline — a missed cut at worst costs one stale
 baseline window, it does not by itself create a false pixelation alarm.
 
+PERFORMANCE:
+--------------
+The histogram is computed with cv2.calcHist (float32), which is far faster than
+np.histogram on full-HD frames. The stateful SceneCutDetector caches the
+PREVIOUS frame's normalized histogram (a small HIST_BINS vector) rather than a
+full-frame copy, so each new frame costs exactly one histogram computation and
+one vector intersection — no per-frame frame copy, no recomputation of the
+previous histogram. Binning is identical to np.histogram over [0, 256), so cut
+decisions are unchanged.
+
 CHANNEL CONVENTION & PIXEL DEPTH:
 -----------------------------------
 Operates on a single-channel (grayscale/luma) 2D frame, consistent with the
@@ -62,6 +72,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+import cv2
 import numpy as np
 
 from pixelation_detector.config import CutDetectorConfig
@@ -97,14 +108,28 @@ class CutDetectionResult:
 def _normalized_histogram(frame_gray: np.ndarray, bins: int) -> np.ndarray:
     """
     Normalized intensity histogram (sums to 1) of a grayscale frame, over the
-    8-bit range. A genuinely empty (all-zero-size) frame is rejected upstream,
-    so `total` is always > 0 here; the guard is defensive only.
+    8-bit range, computed with cv2.calcHist. Binning matches np.histogram with
+    range=[0, 256) (pixel values are 8-bit, so the 256 right edge is never hit).
+    A genuinely empty frame is rejected upstream, so `total` is always > 0 here;
+    the guard is defensive only.
+
+    Returns a float64 1-D array of length `bins`.
     """
-    hist, _ = np.histogram(frame_gray, bins=bins, range=_HISTOGRAM_RANGE)
-    total = hist.sum()
-    if total == 0:
+    # cv2.calcHist requires a contiguous single-channel uint8 array.
+    if frame_gray.dtype != np.uint8:
+        frame_gray = frame_gray.astype(np.uint8)
+    hist = cv2.calcHist(
+        [frame_gray], [0], None, [bins], list(_HISTOGRAM_RANGE)
+    ).reshape(-1)
+    total = float(hist.sum())
+    if total == 0.0:
         return hist.astype(np.float64)
-    return hist.astype(np.float64) / float(total)
+    return hist.astype(np.float64) / total
+
+
+def _intersect(hist_a: np.ndarray, hist_b: np.ndarray) -> float:
+    """Histogram-intersection similarity of two normalized histograms."""
+    return float(np.sum(np.minimum(hist_a, hist_b)))
 
 
 def histogram_intersection(
@@ -160,9 +185,7 @@ def histogram_intersection(
 
     hist_a = _normalized_histogram(frame_a_gray, config.HIST_BINS)
     hist_b = _normalized_histogram(frame_b_gray, config.HIST_BINS)
-
-    intersection = float(np.sum(np.minimum(hist_a, hist_b)))
-    return intersection
+    return _intersect(hist_a, hist_b)
 
 
 def detect_cut(
@@ -204,8 +227,8 @@ def detect_cut(
 class SceneCutDetector:
     """
     Stateful, streaming scene-cut detector. Feed it one frame at a time with
-    update(); it remembers the previous frame and reports whether each new
-    frame begins a new shot.
+    update(); it remembers the previous frame's histogram and reports whether
+    each new frame begins a new shot.
 
     Typical pipeline use:
         detector = SceneCutDetector(config.cut)
@@ -218,7 +241,8 @@ class SceneCutDetector:
 
     def __init__(self, config: Optional[CutDetectorConfig] = None) -> None:
         self.config = config or CutDetectorConfig()
-        self._previous_frame_gray: Optional[np.ndarray] = None
+        # Cache the PREVIOUS frame's normalized histogram, not the frame.
+        self._previous_histogram: Optional[np.ndarray] = None
         self._frame_index: int = -1
 
     def reset(self) -> None:
@@ -227,8 +251,8 @@ class SceneCutDetector:
         as a first frame (cannot be a cut). Useful when reusing one detector
         across independent clips. Does NOT reset the frame index counter.
         """
-        logger.debug("SceneCutDetector reset (previous frame cleared).")
-        self._previous_frame_gray = None
+        logger.debug("SceneCutDetector reset (previous histogram cleared).")
+        self._previous_histogram = None
 
     def update(self, frame_gray: np.ndarray) -> CutDetectionResult:
         """
@@ -246,23 +270,30 @@ class SceneCutDetector:
             CutDetectionResult with the current frame's stream index.
 
         Raises:
-            ValueError: if frame_gray is not 2D/empty, or its shape differs
-                from the previous frame's.
+            ValueError: if frame_gray is not 2D/empty.
+
+        NOTE: because only the histogram of the previous frame is retained,
+        a shape change between consecutive frames is not validated here (the
+        histogram is shape-independent). Shape consistency across a stream is
+        enforced upstream by the metrics, which compare reference vs test.
         """
         self._frame_index += 1
 
-        if self._previous_frame_gray is None:
-            # No predecessor: validate shape minimally by computing nothing,
-            # but still reject obviously bad input for a clear early error.
-            if frame_gray.ndim != 2:
-                raise ValueError(
-                    "SceneCutDetector.update requires a 2D (grayscale) frame."
-                )
-            if frame_gray.size == 0:
-                raise ValueError(
-                    "SceneCutDetector.update received an empty frame."
-                )
-            self._previous_frame_gray = frame_gray.copy()
+        if frame_gray.ndim != 2:
+            raise ValueError(
+                "SceneCutDetector.update requires a 2D (grayscale) frame."
+            )
+        if frame_gray.size == 0:
+            raise ValueError(
+                "SceneCutDetector.update received an empty frame."
+            )
+
+        current_histogram = _normalized_histogram(
+            frame_gray, self.config.HIST_BINS
+        )
+
+        if self._previous_histogram is None:
+            self._previous_histogram = current_histogram
             logger.debug(
                 "SceneCutDetector: first frame (index %d), no cut.",
                 self._frame_index,
@@ -271,21 +302,21 @@ class SceneCutDetector:
                 is_cut=False, intersection=1.0, frame_index=self._frame_index
             )
 
-        result = detect_cut(
-            self._previous_frame_gray, frame_gray, self.config
-        )
-        # Advance the window: the current frame becomes the predecessor.
-        self._previous_frame_gray = frame_gray.copy()
+        intersection = _intersect(self._previous_histogram, current_histogram)
+        is_cut = intersection < self.config.INTERSECTION_CUT_THRESHOLD
 
-        if result.is_cut:
+        # Advance the window: the current histogram becomes the predecessor.
+        self._previous_histogram = current_histogram
+
+        if is_cut:
             logger.info(
                 "Scene cut detected at frame %d (intersection=%.4f).",
                 self._frame_index,
-                result.intersection,
+                intersection,
             )
 
         return CutDetectionResult(
-            is_cut=result.is_cut,
-            intersection=result.intersection,
+            is_cut=is_cut,
+            intersection=intersection,
             frame_index=self._frame_index,
         )

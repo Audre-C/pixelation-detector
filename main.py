@@ -139,6 +139,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--frame-skip",
+        type=int,
+        default=1,
+        help=(
+            "Continuous mode only: analyze every Nth frame (default 1 = every "
+            "frame). N>1 trades time resolution for real-time throughput; "
+            "events shorter than N analyzed frames may be missed."
+        ),
+    )
+    parser.add_argument(
         "--continuous-report",
         type=str,
         default=None,
@@ -303,6 +313,7 @@ def run_continuous(args: argparse.Namespace) -> int:
         fps=fps,
         stats_interval_s=args.stats_interval,
         config=config,
+        frame_skip=args.frame_skip,
     )
 
     try:

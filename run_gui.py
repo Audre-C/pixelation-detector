@@ -113,6 +113,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--display-width",
+        type=int,
+        default=960,
+        help=(
+            "Max width (px) frames are downscaled to for display. Lower = far "
+            "less GUI/CPU load (frees the detector). 0 disables downscaling. "
+            "Default: 960."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         type=str,
         default=LOG_LEVEL,
@@ -150,6 +160,7 @@ def main() -> int:
         test_path=args.test,
         frame_skip=args.frame_skip,
         config=DEFAULT_CONFIG,
+        display_max_width=args.display_width,
     )
 
     playback_worker = None
@@ -159,6 +170,7 @@ def main() -> int:
             test_path=args.test,
             decode_reference=need_live_ref,
             decode_test=need_live_test,
+            display_max_width=args.display_width,
         )
 
     window = MainWindow(detection_worker, playback_worker, panels)

@@ -4,10 +4,9 @@ gui/playback_worker.py
 
 PlaybackWorker — decode-only, native-fps video playback.
 
-Shows "what the broadcast actually looks like" at source fps, independent of
-detector speed. It decodes only the feeds requested (decode_reference /
-decode_test) so unused panels cost nothing. Source-agnostic via a FrameSource
-factory (a future TS/UDP/RTP source drops in unchanged).
+Plays the requested feed(s) at source fps, independent of detector speed. Frames
+are downscaled (to display_max_width) in this thread before emission so the GUI
+never scales full-HD images. Source-agnostic via a FrameSource factory.
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Iterator, Optional, Tuple
 
+import cv2
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 
@@ -27,21 +27,25 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PlaybackFrame:
-    """One real-time playback tick. A feed not being decoded is None."""
     frame_index: int
     reference_bgr: Optional[np.ndarray]
     test_bgr: Optional[np.ndarray]
 
 
+def _downscale_for_display(
+    frame_bgr: Optional[np.ndarray], max_width: int
+) -> Optional[np.ndarray]:
+    if frame_bgr is None or max_width <= 0:
+        return frame_bgr
+    h, w = frame_bgr.shape[:2]
+    if w <= max_width:
+        return frame_bgr
+    new_w = max_width
+    new_h = max(1, int(round(h * (max_width / w))))
+    return cv2.resize(frame_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
 class PlaybackWorker(QThread):
-    """
-    Loops the requested source(s) forever at native fps and emits PlaybackFrame.
-
-    Signals:
-        frames_ready(PlaybackFrame) — once per decoded frame, paced to fps.
-        worker_error(str)           — if a source cannot be opened.
-    """
-
     frames_ready = Signal(object)
     worker_error = Signal(str)
 
@@ -52,6 +56,7 @@ class PlaybackWorker(QThread):
         decode_reference: bool = True,
         decode_test: bool = True,
         source_factory: Optional[Callable[[str], FrameSource]] = None,
+        display_max_width: int = 960,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -60,6 +65,7 @@ class PlaybackWorker(QThread):
         self._decode_reference = decode_reference
         self._decode_test = decode_test
         self._source_factory = source_factory or FileFrameSource
+        self._display_max_width = display_max_width
         self._abort = False
 
     def stop(self) -> None:
@@ -71,7 +77,7 @@ class PlaybackWorker(QThread):
 
     def run(self) -> None:
         if not (self._decode_reference or self._decode_test):
-            return  # nothing to play
+            return
 
         ref_src: Optional[FrameSource] = None
         test_src: Optional[FrameSource] = None
@@ -89,6 +95,7 @@ class PlaybackWorker(QThread):
         meta = meta_src.get_metadata()
         fps = meta.fps if (meta.fps and meta.fps > 0) else 25.0
         frame_interval = 1.0 / fps
+        max_w = self._display_max_width
 
         def pairs() -> Iterator[Tuple[Optional[np.ndarray], Optional[np.ndarray]]]:
             if ref_src is not None and test_src is not None:
@@ -113,8 +120,8 @@ class PlaybackWorker(QThread):
                     self.frames_ready.emit(
                         PlaybackFrame(
                             frame_index=emitted,
-                            reference_bgr=ref_bgr,
-                            test_bgr=test_bgr,
+                            reference_bgr=_downscale_for_display(ref_bgr, max_w),
+                            test_bgr=_downscale_for_display(test_bgr, max_w),
                         )
                     )
                     emitted += 1

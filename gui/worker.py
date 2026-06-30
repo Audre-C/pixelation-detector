@@ -4,30 +4,17 @@ gui/worker.py
 
 DetectionWorker — the detector→UI bridge.
 
-This is the ONLY place the GUI touches the detector. It runs the existing
-per-frame pipeline (PixelationDetectionPipeline.analyze_pair) and the existing
-streaming alarm logic (StreamingAlarmTracker) inside a QThread, and PUBLISHES
-results as Qt signals. The GUI (main thread) SUBSCRIBES to those signals and
-renders them; it never calls into the detector directly and the detector never
-imports Qt.
+Runs the existing per-frame pipeline (analyze_pair) and the streaming alarm
+logic (StreamingAlarmTracker) in a QThread and PUBLISHES results as Qt signals.
+No detector code is modified; this only consumes the public API.
 
-Design points:
-  - No detector code is modified. This worker only *consumes* the public API:
-    FileFrameSource, pipeline.analyze_pair, StreamingAlarmTracker.
-  - Real-time pacing: frames are emitted at the source frame rate so the demo
-    plays like live broadcast, regardless of how fast analysis runs.
-  - Frame-skip aware: every decoded frame is emitted for smooth video, but only
-    every Nth is analyzed (mirrors ContinuousRunner). Metrics on non-analyzed
-    frames are None; the GUI simply keeps showing the last values.
-  - Source-agnostic: it takes a FrameSource factory, so swapping MP4/TS/UDP/RTP
-    later changes nothing here.
-  - Clean shutdown via stop() + QThread interruption.
-
-Threading contract:
-  - All heavy work (decode, analyze) happens in this thread.
-  - Signals carry plain Python objects (dataclasses + numpy arrays). Qt's queued
-    connections marshal them to the GUI thread safely. The GUI converts frames
-    to QImage on its side, so this thread is never blocked by rendering.
+Render-path performance:
+  - Frames are DOWNSCALED for display (to display_max_width) inside this worker
+    thread, so the GUI thread never copies/scales full-HD images. This keeps CPU
+    free for analysis.
+  - Display emission is THROTTLED to display_fps so the GUI event queue cannot
+    flood. Analysis and event detection still run on every analyzed frame;
+    only the visual update is rate-limited.
 """
 
 from __future__ import annotations
@@ -37,6 +24,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+import cv2
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 
@@ -48,48 +36,36 @@ from pixelation_detector.alarms.alarm_manager import classify_severity
 
 logger = logging.getLogger(__name__)
 
-
-# Severity label used by the UI when no alarm-level activity is present.
 SEVERITY_NONE = "NONE"
 
 
-# ---------------------------------------------------------------------------
-# Signal payloads (plain data; safe to pass across the thread boundary)
-# ---------------------------------------------------------------------------
-
 @dataclass
 class ActiveEvent:
-    """Live state of an in-progress alarm, for the flashing banner."""
-    event_id: int            # provisional id (matches the logged id on confirm)
-    start_frame: int         # source-frame index where the run opened
-    duration_frames: int     # source frames elapsed since the run opened
+    event_id: int
+    start_frame: int
+    duration_frames: int
     current_score: float
     peak_score: float
-    severity: str            # banded from the running peak
+    severity: str
 
 
 @dataclass
 class FramePayload:
-    """Everything the GUI needs to render one frame tick."""
-    frame_index: int                 # source frame number
-    reference_bgr: np.ndarray        # decoded BGR frame for the left panel
-    test_bgr: np.ndarray             # decoded BGR frame for the right panel
-    analyzed: bool                   # True if metrics below are fresh this tick
+    frame_index: int
+    reference_bgr: np.ndarray         # already downscaled for display
+    test_bgr: np.ndarray              # already downscaled for display
+    analyzed: bool
     psnr_db: Optional[float]
     mean_ssim: Optional[float]
     delta_bds: Optional[float]
     final_score: Optional[float]
-    severity: str                    # per-frame severity (NONE/LOW/MEDIUM/HIGH)
-    active_event: Optional[ActiveEvent]  # non-None while an alarm is active
-    # Placeholder for a future affected-region rectangle in TEST-frame pixel
-    # coords (x, y, w, h). None today because the detector does not publish
-    # region info on the per-frame path. The GUI draws it only when present.
+    severity: str
+    active_event: Optional[ActiveEvent]
     region_bbox: Optional[tuple] = None
 
 
 @dataclass
 class EventRecord:
-    """A confirmed, finalized event, for the scrolling log table."""
     event_id: int
     start_frame: int
     end_frame: int
@@ -103,10 +79,9 @@ class EventRecord:
 
 @dataclass
 class StatsPayload:
-    """Periodic system stats for the top bar."""
-    status: str               # ONLINE / MONITORING / ALARM ACTIVE
-    processing_fps: float     # analyzed frames per wall second (detector rate)
-    display_fps: float        # frames emitted per wall second (playback rate)
+    status: str
+    processing_fps: float
+    display_fps: float
     elapsed_s: float
     frames_read: int
     frames_analyzed: int
@@ -114,30 +89,33 @@ class StatsPayload:
 
 
 def _per_frame_severity(score: float, config: PipelineConfig) -> str:
-    """
-    Map a per-frame FinalScore to a UI severity label. Below the event trigger
-    we still surface LOW for any positive activity (useful live feedback);
-    zero/clean is NONE. At or above the trigger we use the configured banding.
-    """
     alarms = config.alarms
     if score < alarms.EVENT_TRIGGER_SCORE:
         return "LOW" if score > 0.0 else SEVERITY_NONE
     return classify_severity(score, alarms).upper()
 
 
-# ---------------------------------------------------------------------------
-# Worker thread
-# ---------------------------------------------------------------------------
+def _downscale_for_display(frame_bgr: np.ndarray, max_width: int) -> np.ndarray:
+    """Shrink a frame to max_width (keeping aspect) for cheap GUI rendering."""
+    if max_width <= 0:
+        return frame_bgr
+    h, w = frame_bgr.shape[:2]
+    if w <= max_width:
+        return frame_bgr
+    new_w = max_width
+    new_h = max(1, int(round(h * (max_width / w))))
+    return cv2.resize(frame_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
 
 class DetectionWorker(QThread):
     """
     Runs the detector over two looping frame sources and emits results.
 
     Signals:
-        frame_ready(FramePayload)   — once per decoded frame (paced to fps).
+        frame_ready(FramePayload)   — throttled to display_fps.
         event_logged(EventRecord)   — when a confirmed event finalizes.
         stats_updated(StatsPayload) — roughly twice per second.
-        worker_error(str)           — on a fatal error (sources won't open, etc.).
+        worker_error(str)           — on a fatal error.
     """
 
     frame_ready = Signal(object)
@@ -145,7 +123,6 @@ class DetectionWorker(QThread):
     stats_updated = Signal(object)
     worker_error = Signal(str)
 
-    # How often (wall seconds) to emit a stats update.
     _STATS_INTERVAL_S = 0.5
 
     def __init__(
@@ -155,76 +132,59 @@ class DetectionWorker(QThread):
         frame_skip: int = 1,
         config: Optional[PipelineConfig] = None,
         source_factory: Optional[Callable[[str], FrameSource]] = None,
+        display_max_width: int = 960,
+        display_fps: float = 20.0,
         parent=None,
     ) -> None:
-        """
-        Args:
-            reference_path / test_path: inputs (mp4/ts/...; any FFmpeg-readable).
-            frame_skip: analyze every Nth frame (>=1). Every frame is still
-                emitted for smooth video.
-            config: PipelineConfig (defaults to DEFAULT_CONFIG).
-            source_factory: callable(path) -> FrameSource. Defaults to
-                FileFrameSource. Swap this for a TransportStreamFrameSource
-                later WITHOUT changing this class.
-        """
         super().__init__(parent)
         self._reference_path = reference_path
         self._test_path = test_path
         self._frame_skip = max(1, int(frame_skip))
         self._config = config or DEFAULT_CONFIG
         self._source_factory = source_factory or FileFrameSource
-
+        self._display_max_width = display_max_width
+        self._display_interval = 1.0 / display_fps if display_fps > 0 else 0.0
         self._abort = False
 
-    # -- lifecycle ---------------------------------------------------------
-
     def stop(self) -> None:
-        """Request a graceful stop; safe to call from the GUI thread."""
         self._abort = True
         self.requestInterruption()
 
     def _should_stop(self) -> bool:
         return self._abort or self.isInterruptionRequested()
 
-    # -- main loop ---------------------------------------------------------
-
-    def run(self) -> None:  # noqa: C901 - linear, readable
+    def run(self) -> None:  # noqa: C901
         try:
             ref_src = self._source_factory(self._reference_path)
             test_src = self._source_factory(self._test_path)
-        except Exception as exc:  # FileNotFoundError, IOError, etc.
+        except Exception as exc:
             logger.exception("DetectionWorker: failed to open sources.")
             self.worker_error.emit(str(exc))
             return
 
         config = self._config
         skip = self._frame_skip
+        max_w = self._display_max_width
+        disp_interval = self._display_interval
 
         ref_meta = ref_src.get_metadata()
         fps = ref_meta.fps if (ref_meta.fps and ref_meta.fps > 0) else 25.0
         frame_interval = 1.0 / fps
 
         pipeline = PixelationDetectionPipeline(config)
-
-        # Tracker runs in contiguous SAMPLE space at the effective (post-skip)
-        # rate so timestamps are true source-time; event frame numbers are
-        # rescaled by skip back to source frames on emit.
         effective_fps = fps / skip
         tracker = StreamingAlarmTracker(config.alarms, fps=effective_fps)
 
-        # counters / state
-        read_count = 0       # all frames consumed (drives skip schedule + pacing)
-        sample_index = 0     # contiguous index of analyzed frames only
+        read_count = 0
+        sample_index = 0
         frames_analyzed = 0
         events_detected = 0
 
-        # live event bookkeeping (for the banner)
         in_event_prev = False
         ev_start_sample = 0
         ev_peak = 0.0
         last_active: Optional[ActiveEvent] = None
 
-        # last good metrics (carried over skipped frames)
         last_psnr: Optional[float] = None
         last_ssim: Optional[float] = None
         last_bds: Optional[float] = None
@@ -233,6 +193,7 @@ class DetectionWorker(QThread):
 
         wall_start = time.perf_counter()
         last_stats = wall_start
+        last_display = 0.0
 
         try:
             while not self._should_stop():
@@ -314,24 +275,26 @@ class DetectionWorker(QThread):
                             sample_index += 1
                             last_active = active
 
-                    # Emit a frame tick for EVERY decoded frame (smooth video).
-                    payload = FramePayload(
-                        frame_index=source_frame,
-                        reference_bgr=ref_bgr,
-                        test_bgr=test_bgr,
-                        analyzed=analyzed_now,
-                        psnr_db=last_psnr,
-                        mean_ssim=last_ssim,
-                        delta_bds=last_bds,
-                        final_score=last_score,
-                        severity=last_severity,
-                        active_event=active,
-                        region_bbox=None,  # placeholder; detector publishes none
-                    )
-                    self.frame_ready.emit(payload)
-
-                    # periodic stats
                     now = time.perf_counter()
+
+                    # Throttled, downscaled display update.
+                    if disp_interval <= 0.0 or (now - last_display) >= disp_interval:
+                        payload = FramePayload(
+                            frame_index=source_frame,
+                            reference_bgr=_downscale_for_display(ref_bgr, max_w),
+                            test_bgr=_downscale_for_display(test_bgr, max_w),
+                            analyzed=analyzed_now,
+                            psnr_db=last_psnr,
+                            mean_ssim=last_ssim,
+                            delta_bds=last_bds,
+                            final_score=last_score,
+                            severity=last_severity,
+                            active_event=active,
+                            region_bbox=None,
+                        )
+                        self.frame_ready.emit(payload)
+                        last_display = now
+
                     if now - last_stats >= self._STATS_INTERVAL_S:
                         elapsed = now - wall_start
                         status = "ALARM ACTIVE" if active is not None else "MONITORING"
@@ -352,42 +315,28 @@ class DetectionWorker(QThread):
                         )
                         last_stats = now
 
-                    # Real-time pacing: hold each frame to the source rate so the
-                    # demo plays like live broadcast. If we're behind, don't sleep.
+                    # Real-time pacing (don't outrun the source).
                     target = wall_start + read_count * frame_interval
                     sleep_s = target - time.perf_counter()
                     if sleep_s > 0:
-                        # msleep keeps the thread responsive to interruption.
                         self.msleep(int(sleep_s * 1000))
 
-                # EOF on either source -> re-call frames() (rewind for files,
-                # continue for a live source). Loops forever until stop().
                 if not produced:
                     logger.warning(
                         "DetectionWorker: source produced no frames; stopping."
                     )
                     break
-
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("DetectionWorker: unexpected error in run loop.")
             self.worker_error.emit(str(exc))
         finally:
-            try:
-                ref_src.close()
-            except Exception:
-                pass
-            try:
-                test_src.close()
-            except Exception:
-                pass
+            for src in (ref_src, test_src):
+                try:
+                    src.close()
+                except Exception:
+                    pass
             logger.info("DetectionWorker: stopped.")
 
-
-# ---------------------------------------------------------------------------
-# Headless smoke test (no GUI window): verifies the detector bridge works.
-#   python -m gui.worker data/normal-converted.mp4 data/error-converted.mp4
-# Runs ~6 seconds, prints events/stats, then exits.
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import sys
@@ -406,30 +355,23 @@ if __name__ == "__main__":
     app = QCoreApplication(sys.argv)
     worker = DetectionWorker(ref, test, frame_skip=fskip)
 
-    _frame_count = {"n": 0}
+    _n = {"c": 0}
 
     def on_frame(p: FramePayload) -> None:
-        _frame_count["n"] += 1
-        # Print only occasionally to avoid flooding.
-        if _frame_count["n"] % 25 == 0:
+        _n["c"] += 1
+        if _n["c"] % 20 == 0:
             print(
                 f"frame {p.frame_index} analyzed={p.analyzed} "
                 f"score={p.final_score} sev={p.severity} "
-                f"alarm={'YES' if p.active_event else 'no'}"
+                f"alarm={'YES' if p.active_event else 'no'} "
+                f"disp_shape={p.reference_bgr.shape}"
             )
 
     def on_event(e: EventRecord) -> None:
-        print(
-            f"*** EVENT #{e.event_id} frames [{e.start_frame}-{e.end_frame}] "
-            f"peak={e.peak_score:.1f} {e.severity}"
-        )
+        print(f"*** EVENT #{e.event_id} [{e.start_frame}-{e.end_frame}] {e.severity}")
 
     def on_stats(s: StatsPayload) -> None:
-        print(
-            f"[stats] {s.status} proc={s.processing_fps:.1f}fps "
-            f"disp={s.display_fps:.1f}fps read={s.frames_read} "
-            f"events={s.events_detected}"
-        )
+        print(f"[stats] {s.status} proc={s.processing_fps:.1f}fps events={s.events_detected}")
 
     def on_error(msg: str) -> None:
         print(f"ERROR: {msg}")
